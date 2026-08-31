@@ -1,0 +1,13 @@
+build/
+.gradle/
+.kotlin/
+local.properties
+.idea/
+*.iml
+captures/
+
+# Never commit these. The feed URL carries a bearer token that reads your
+# whole calendar with no login, and the feed itself is personal data.
+*.ics
+feed-url.txt
+secrets.properties
