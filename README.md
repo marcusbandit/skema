@@ -1,7 +1,8 @@
 # skema
 
-A Kotlin Multiplatform calendar for DTU Learn. Right now it is the parsing
-core plus a verified build; the UI is not written yet.
+A Kotlin Multiplatform calendar for DTU Learn. Paste your calendar link into
+Settings and it syncs, caches and shows your timetable. Runs on Android and on
+the desktop from the same code.
 
 ## Why this exists
 
@@ -10,7 +11,28 @@ show you a lecture that moved rooms yesterday without ever mentioning the
 move. This reads the same data, keeps it, and can compare today against
 yesterday.
 
-## What works today
+## Running it
+
+    ./gradlew :desktopApp:run          # same UI, no emulator
+    ./gradlew :androidApp:assembleDebug
+
+Then open Settings and paste your feed URL. It is stored in the app's own
+private directory (`~/.local/share/skema` on the desktop, `filesDir` on
+Android) and never leaves the device except to ask DTU for the feed.
+
+## What it does
+
+Syncs on open and on demand, keeps the last feed so it opens instantly
+offline, and reports what moved since the previous sync. The feed sends no
+`ETag` and no `Last-Modified`, only `no-cache, no-store`, so there is nothing
+cheap to ask: every sync pulls the whole thing and diffs it locally.
+
+Duplicate entries fold into one, taking the room from the generated booking
+and the title from the teacher. Entries DTU generated are all titled
+"Lecture" and name their course only in `LOCATION`, so the course leads and
+the generic word goes underneath.
+
+## The parser
 
 `shared/src/commonMain/kotlin/dk/bandit/skema/ics/` parses the DTU Learn
 iCalendar feed. It has no Android or JVM dependencies, so it runs anywhere
@@ -72,7 +94,8 @@ both plain weekly, and there is no `EXDATE`, `RDATE`, `EXRULE` or
 
 ## Layout
 
-    shared/       KMP library. Parsing, dedup, and later the Compose UI.
+    shared/       KMP library. Parsing, dedup, storage, network, Compose UI.
+                  Everything except the two lines each platform needs.
     androidApp/   Android application. AGP 9 forbids the application plugin
                   inside a KMP module, so this is deliberately separate.
     desktopApp/   Plain JVM. Same UI, no emulator, fast iteration.
@@ -86,7 +109,29 @@ Kotlin 2.4.10, Compose Multiplatform 1.12.0, AGP 9.1.0, Gradle 9.5.0,
 kotlinx-datetime 0.8.0, compileSdk 37, minSdk 26. Gradle runs on JDK 21 via
 `org.gradle.java.home`; JDK 26 also works but 21 matches what the IDE ships.
 
+## Platform glue, all of it
+
+Two things cannot be written in common code, so each has an `expect` and two
+`actual`s in `shared/src/{android,jvm}Main`:
+
+    Vault      where files go. Android needs a Context, so MainActivity calls
+               SkemaAndroid.init(applicationContext) before App().
+    httpClient Ktor has no common engine. OkHttp on Android, CIO on the JVM.
+
+`FileVault` is deliberately duplicated between the two rather than hoisted
+into a custom source-set hierarchy, which would be a lot of build machinery
+to save fifteen lines.
+
+## Design rules this follows
+
+Three font sizes for the whole app, from `Type` in `ui/Theme.kt`, with
+hierarchy carried by weight, colour and space. No font family is named
+anywhere, so every face is the platform's own system sans and nothing is
+downloaded. Every rounded corner goes through `SquircleShape`, which is
+G2-continuous; `RoundedCornerShape` appears nowhere.
+
 ## Not done yet
 
-Fetching over the network, storage, the UI, and background refresh. The
-parser takes a `String`, so nothing above depends on how that string arrives.
+Background refresh while the app is closed, and notifications when something
+moves. Everything needed for both is already here: `SkemaRepository.refresh`
+returns a `Diff`, so a WorkManager job on Android is the missing piece.
