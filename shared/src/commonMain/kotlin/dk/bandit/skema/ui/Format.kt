@@ -32,6 +32,16 @@ private fun pad(n: Int): String = if (n < 10) "0$n" else n.toString()
 
 fun clock(t: LocalDateTime): String = pad(t.hour) + ":" + pad(t.minute)
 
+/** Minutes since midnight, right now. What the "you are here" line is drawn at. */
+@OptIn(ExperimentalTime::class)
+fun nowMinutes(): Int {
+    val t = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+    return t.hour * 60 + t.minute
+}
+
+/** "09:00" from a plain minute count, for the grid's clock gutter. */
+fun clockOfMinute(minute: Int): String = pad((minute / 60) % 24) + ":" + pad(minute % 60)
+
 /** "Wed 3 Sep", with the year only when it is not this one. */
 fun dateLabel(d: LocalDate, reference: LocalDate = today()): String {
     val base = weekdayShort(d.dayOfWeek) + " " + d.day + " " + monthShort(d.month)

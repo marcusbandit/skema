@@ -11,7 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import dk.bandit.skema.data.SkemaRepository
 import dk.bandit.skema.data.ThemeChoice
-import dk.bandit.skema.ui.AgendaScreen
+import dk.bandit.skema.ui.CalendarShell
 import dk.bandit.skema.ui.Screen
 import dk.bandit.skema.ui.SettingsScreen
 import dk.bandit.skema.ui.SkemaModel
@@ -44,7 +44,7 @@ fun App() {
         // not, so the whole app keeps out of the status and gesture bars.
         Box(Modifier.fillMaxSize().background(skema.background).safeDrawingPadding()) {
             when (model.screen) {
-                Screen.Agenda -> AgendaScreen(model)
+                Screen.Calendar -> CalendarShell(model)
                 Screen.Settings -> SettingsScreen(model)
             }
         }

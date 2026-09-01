@@ -1,6 +1,7 @@
 package dk.bandit.skema.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,20 +22,25 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dk.bandit.skema.ics.CalendarEvent
-import dk.bandit.skema.ics.Dedup
-import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 
-/** Middle dot, deliberately not a dash. */
-private const val SEPARATOR = "  ·  "
+/**
+ * The calendar as a list.
+ *
+ * Everything the grids do with position, this does with reading order, which
+ * is why it stays: a grid answers "when is my Thursday busy" and a list
+ * answers "what is next", and the second question is the one asked while
+ * walking. It owns no chrome. The shell above it holds the title, the sync
+ * button and the view switch, so this draws rows and nothing else.
+ */
 
 private sealed interface AgendaRow {
     data class Day(val date: LocalDate, val isToday: Boolean, val isPast: Boolean) : AgendaRow
@@ -42,16 +48,19 @@ private sealed interface AgendaRow {
 }
 
 @Composable
-fun AgendaScreen(model: SkemaModel) {
+fun AgendaView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Modifier) {
     val c = skema
-    val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
+    // Keyed on the raw feed and the merge setting rather than on the merged
+    // list, because reading model.visible runs the merge, and a key that has
+    // to be computed before it can be compared saves nothing.
     val rows = remember(model.events, model.settings.collapseDuplicates) {
-        buildRows(model.events, model.settings.collapseDuplicates)
+        buildRows(model.visible, model.conflicts)
     }
 
-    // Land on today the first time events arrive, then leave the scroll alone.
+    // Land on today the first time entries arrive, then leave the scroll
+    // alone. A list that re-centres itself on every sync loses your place.
     var placed by remember { mutableStateOf(false) }
     LaunchedEffect(rows.size) {
         if (!placed && rows.isNotEmpty()) {
@@ -60,84 +69,38 @@ fun AgendaScreen(model: SkemaModel) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(c.background)) {
-        TopBar(
-            model = model,
-            onToday = { scope.launch { listState.animateScrollToItem(todayIndex(rows)) } },
-            onRefresh = { scope.launch { model.refresh() } },
-        )
+    if (rows.isEmpty()) {
+        Box(modifier.fillMaxSize().padding(Space.large), contentAlignment = Alignment.Center) {
+            Text(
+                if (model.hasUrl) "Nothing cached yet." else "No feed link yet.",
+                color = c.inkMuted,
+                fontSize = Type.normal,
+            )
+        }
+        return
+    }
 
-        if (rows.isEmpty()) {
-            EmptyState(model, onRefresh = { scope.launch { model.refresh() } })
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = Space.medium,
-                    end = Space.medium,
-                    top = Space.small,
-                    bottom = Space.large,
-                ),
-                verticalArrangement = Arrangement.spacedBy(Space.unit),
-            ) {
-                items(rows.size, key = { keyFor(rows[it]) }) { index ->
-                    when (val row = rows[index]) {
-                        is AgendaRow.Day -> DayHeader(row)
-                        is AgendaRow.Entry -> EventCard(row)
-                    }
-                }
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = Space.medium,
+            end = Space.medium,
+            top = Space.small,
+            bottom = Space.large,
+        ),
+        verticalArrangement = Arrangement.spacedBy(Space.unit),
+    ) {
+        items(rows.size, key = { keyFor(rows[it]) }) { index ->
+            when (val row = rows[index]) {
+                is AgendaRow.Day -> DayHeader(row)
+                is AgendaRow.Entry -> EventRow(
+                    row = row,
+                    tint = palette.tint(row.event.courseCode),
+                    onPick = { model.picked = row.event },
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun TopBar(model: SkemaModel, onToday: () -> Unit, onRefresh: () -> Unit) {
-    val c = skema
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(c.background)
-            .padding(horizontal = Space.medium, vertical = Space.small)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Skema",
-                color = c.accent,
-                fontSize = Type.large,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.width(Space.small))
-            Text(
-                dateLabel(today()),
-                color = c.inkMuted,
-                fontSize = Type.small,
-                modifier = Modifier.weight(1f),
-            )
-            PillButton("Today", onToday)
-            Spacer(Modifier.width(Space.tight))
-            PillButton(
-                label = if (model.busy) "Syncing" else "Sync",
-                onClick = onRefresh,
-                enabled = !model.busy && model.hasUrl,
-                filled = true,
-            )
-            Spacer(Modifier.width(Space.tight))
-            PillButton("Settings", { model.screen = Screen.Settings })
-        }
-
-        if (model.status.isNotBlank()) {
-            Spacer(Modifier.height(Space.tight))
-            Text(
-                model.status + ", " + agoLabel(model.fetchedAt),
-                color = if (model.failed) c.accentStrong else c.inkMuted,
-                fontSize = Type.small,
-            )
-        }
-
-        Spacer(Modifier.height(Space.small))
-        Box(Modifier.fillMaxWidth().height(1.dp).background(c.hairline))
     }
 }
 
@@ -171,12 +134,18 @@ private fun DayHeader(row: AgendaRow.Day) {
 }
 
 @Composable
-private fun EventCard(row: AgendaRow.Entry) {
+private fun EventRow(row: AgendaRow.Entry, tint: CourseTint, onPick: () -> Unit) {
     val c = skema
     val e = row.event
     val dim = row.isPast
 
-    Card(Modifier.fillMaxWidth(), PaddingValues(Space.small)) {
+    Card(
+        Modifier
+            .fillMaxWidth()
+            .clip(SquircleShape(Radius.card))
+            .clickable(onClick = onPick),
+        PaddingValues(Space.small),
+    ) {
         Row(verticalAlignment = Alignment.Top) {
             // Times, monospace so the columns line up down the whole list.
             Column(Modifier.width(52.dp)) {
@@ -197,11 +166,14 @@ private fun EventCard(row: AgendaRow.Entry) {
                 }
             }
 
+            // The course's own colour, so the list scans by subject the way
+            // the grid does. Red is kept out of it: red means a clash here,
+            // and a course that happened to land on red would say so falsely.
             Box(
                 Modifier
                     .width(2.dp)
                     .height(34.dp)
-                    .background(if (dim) c.hairline else c.accentStrong, pillShape())
+                    .background(if (dim) tint.fill else tint.rail, pillShape())
             )
             Spacer(Modifier.width(Space.small))
 
@@ -230,7 +202,13 @@ private fun EventCard(row: AgendaRow.Entry) {
                 if (e.courseCode != null || row.conflict) {
                     Spacer(Modifier.height(Space.tight))
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.tight)) {
-                        e.courseCode?.let { Tag(it) }
+                        e.courseCode?.let {
+                            Tag(
+                                it,
+                                background = if (dim) tint.soft else tint.fill,
+                                foreground = if (dim) c.inkMuted else tint.ink,
+                            )
+                        }
                         if (row.conflict) {
                             Tag("clash", background = c.accentStrong, foreground = c.onAccent)
                         }
@@ -241,48 +219,17 @@ private fun EventCard(row: AgendaRow.Entry) {
     }
 }
 
-@Composable
-private fun EmptyState(model: SkemaModel, onRefresh: () -> Unit) {
-    val c = skema
-    Box(Modifier.fillMaxSize().padding(Space.large), contentAlignment = Alignment.Center) {
-        Card {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    if (model.hasUrl) "Nothing cached yet" else "No feed link yet",
-                    color = c.ink,
-                    fontSize = Type.large,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(Space.small))
-                Text(
-                    if (model.hasUrl) {
-                        "Sync to pull your calendar from DTU Learn."
-                    } else {
-                        "Paste your DTU Learn calendar link in Settings and this fills up."
-                    },
-                    color = c.inkMuted,
-                    fontSize = Type.normal,
-                )
-                Spacer(Modifier.height(Space.medium))
-                if (model.hasUrl) {
-                    PillButton("Sync now", onRefresh, filled = true, enabled = !model.busy)
-                } else {
-                    PillButton("Open settings", { model.screen = Screen.Settings }, filled = true)
-                }
-            }
-        }
-    }
-}
-
-private fun buildRows(events: List<CalendarEvent>, collapse: Boolean): List<AgendaRow> {
+/**
+ * Day headers interleaved with entries, flattened into one list so the whole
+ * thing is a single LazyColumn and a header costs nothing to scroll past.
+ */
+private fun buildRows(events: List<CalendarEvent>, clashes: Set<Long>): List<AgendaRow> {
     if (events.isEmpty()) return emptyList()
-    val list = if (collapse) Dedup.collapse(events) else events
-    val clashes = Dedup.slots(list).filter { it.isConflict }.map { it.startEpochSeconds }.toSet()
     val reference = today()
 
     val out = mutableListOf<AgendaRow>()
     var day: LocalDate? = null
-    for (e in list) {
+    for (e in events.sortedBy { it.startEpochSeconds }) {
         val d = e.start.date
         if (d != day) {
             out.add(AgendaRow.Day(d, d == reference, d < reference))

@@ -13,8 +13,24 @@ yesterday.
 
 ## Running it
 
-    ./gradlew :desktopApp:run          # same UI, no emulator
-    ./gradlew :androidApp:assembleDebug
+This is an Android app first, so it is developed against the emulator and
+looked at, not left at `assembleDebug`:
+
+    scripts/emulator.sh                # starts the skema_fold AVD, headless
+    scripts/run.sh                     # build, install, launch
+    scripts/shot.sh                    # screenshot straight off the device
+    scripts/fold.sh fold | unfold      # drive the hinge
+    scripts/postures.sh <label>        # capture both postures at once
+
+    ./gradlew :desktopApp:run          # same UI in a window, for quick looks
+
+The emulator is headless by default and driven entirely over adb. That is not
+a limitation: `screencap` gives exact device pixels, and no window has to
+appear on anyone's workspace. `scripts/emulator.sh --window` if you want to
+watch it.
+
+The AVD is `skema_fold`, a Pixel Fold profile with a real hinge. Folded it is
+411 x 797 dp, unfolded 841 x 701 dp.
 
 Then open Settings and paste your feed URL. It is stored in the app's own
 private directory (`~/.local/share/skema` on the desktop, `filesDir` on
@@ -27,8 +43,24 @@ offline, and reports what moved since the previous sync. The feed sends no
 `ETag` and no `Last-Modified`, only `no-cache, no-store`, so there is nothing
 cheap to ask: every sync pulls the whole thing and diffs it locally.
 
-Duplicate entries fold into one, taking the room from the generated booking
-and the title from the teacher. Entries DTU generated are all titled
+Four views: month, week, day and agenda. Week is the one the timetable is
+actually read in, so it is the default. Pinching zooms the hour height, and
+pinching past either end of the range walks to the next view along, so month
+to week to day is one continuous gesture. Swiping sideways moves a week, a
+day or a month depending on what is showing.
+
+Every course gets its own colour, derived rather than picked from a list:
+hues are spread evenly over the number of courses present, in OKLCH so the
+steps are even to the eye, with an arc reserved around DTU red so no course
+can be mistaken for the clash marker. Any subject can be pinned to a hue by
+hand in Settings, and the rest re-spread around it. Lightness and chroma are
+not adjustable, because they are what hold the text contrast above 4.5:1.
+
+Duplicate entries merge field by field rather than one winning: where the two
+agree the value stands, where they differ the teacher's entry wins, and where
+the teacher's entry says nothing the room booking fills in. On one real feed
+that keeps the human title on all 86 mergeable slots while 82 of them gain
+rooms only the booking knew about. Entries DTU generated are all titled
 "Lecture" and name their course only in `LOCATION`, so the course leads and
 the generic word goes underneath.
 
@@ -92,9 +124,29 @@ Recurrence, by contrast, is a non-problem: 2 of 712 entries carry an `RRULE`,
 both plain weekly, and there is no `EXDATE`, `RDATE`, `EXRULE` or
 `RECURRENCE-ID` anywhere. A full RFC 5545 recurrence engine is not needed.
 
+## Folding
+
+The app branches on size in exactly one place, `CalendarShell`. A pane at
+least 600dp wide gets two panes, the calendar and a rail holding the selected
+day or the tapped event; anything narrower gets one pane and a bottom sheet.
+600dp rather than 840dp because the unfolded inner screen is 841 x 701 lying
+down and 701 x 841 standing up, and a device should not change layout when
+you rotate it.
+
+Views measure the pane they were given, not the window, which is what stops
+five day columns being sized for 841dp and drawn into 571dp.
+
+The fold itself is seamless because `AndroidManifest.xml` lists every axis
+the hinge moves in `configChanges`. Without it the hinge is an ordinary
+configuration change: Android destroys the activity, the app restarts and
+refetches, and the scroll position and selected day are gone. With it the
+process keeps running and Compose recomposes against new constraints, which
+is the same code path as a desktop window resize. Verified by folding a
+running app: same pid, no activity relaunch, pixel-identical afterwards.
+
 ## Layout
 
-    shared/       KMP library. Parsing, dedup, storage, network, Compose UI.
+    shared/       KMP library. Parsing, merging, storage, network, Compose UI.
                   Everything except the two lines each platform needs.
     androidApp/   Android application. AGP 9 forbids the application plugin
                   inside a KMP module, so this is deliberately separate.
@@ -130,8 +182,20 @@ anywhere, so every face is the platform's own system sans and nothing is
 downloaded. Every rounded corner goes through `SquircleShape`, which is
 G2-continuous; `RoundedCornerShape` appears nowhere.
 
+Anything that scales with a count is computed from the count. Day columns,
+overlap lanes, hue assignment, month cell dots and hour label density are all
+formulas, not tables, so adding the weekend or a course changes a number and
+nothing else. `ui/Lanes.kt` is the clearest case: which lane an event sits in
+is a property of the set, not the event.
+
 ## Not done yet
 
 Background refresh while the app is closed, and notifications when something
 moves. Everything needed for both is already here: `SkemaRepository.refresh`
 returns a `Diff`, so a WorkManager job on Android is the missing piece.
+
+Hues are spread over every course the feed has ever mentioned, which for a
+feed going back to 2019 is fifteen. Only about six matter in any one term, so
+the six on screen are further apart in hue than they need to be. Narrowing
+the set to the courses in the visible range would give the current term more
+separation.

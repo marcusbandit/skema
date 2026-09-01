@@ -34,22 +34,11 @@ object Dedup {
             .sortedBy { it.startEpochSeconds }
 
     /**
-     * Collapse duplicated slots to one event each, preferring the entry
-     * generated from the room booking: it carries the authoritative room,
-     * and it is the one DTU keeps in step with the timetable. Its title is
-     * generic ("Lecture"), so the human title is carried across.
+     * Collapse duplicated slots to one event each. The work is in
+     * [Merge.collapse], which merges the entries field by field instead of
+     * keeping one and discarding the other; this stays as the name the UI
+     * already calls. Use [Merge.merge] when you also want to know which feed
+     * entries an event came from.
      */
-    fun collapse(events: List<CalendarEvent>): List<CalendarEvent> =
-        slots(events).flatMap { slot ->
-            if (!slot.isDuplicate) slot.events
-            else {
-                val generated = slot.events.firstOrNull { it.fromRoomBooking }
-                val human = slot.events.firstOrNull { !it.fromRoomBooking }
-                when {
-                    generated == null -> listOf(slot.events.first())
-                    human == null -> listOf(generated)
-                    else -> listOf(generated.copy(summary = human.summary))
-                }
-            }
-        }.sortedBy { it.startEpochSeconds }
+    fun collapse(events: List<CalendarEvent>): List<CalendarEvent> = Merge.collapse(events)
 }

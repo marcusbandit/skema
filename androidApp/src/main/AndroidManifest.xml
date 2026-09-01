@@ -6,9 +6,24 @@
     <application
         android:label="Skema"
         android:supportsRtl="true">
+
+        <!--
+          configChanges is what makes folding seamless rather than a blink.
+
+          Without it the hinge is an ordinary configuration change: Android
+          destroys the Activity and builds a new one, so the app restarts,
+          loses the scroll position and the selected day, and refetches. With
+          it the process keeps running and Compose simply recomposes against
+          the new constraints, which is the same code path as a desktop window
+          resize. Every axis the fold actually moves has to be listed: the
+          Pixel Fold changes width, height, screen layout and orientation in
+          one step, and one missing flag is enough to bring the restart back.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|layoutDirection"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

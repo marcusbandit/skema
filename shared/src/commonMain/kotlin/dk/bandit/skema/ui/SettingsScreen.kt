@@ -18,18 +18,32 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dk.bandit.skema.data.ThemeChoice
+import dk.bandit.skema.data.ViewMode
+import dk.bandit.skema.ics.CalendarEvent
 import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(model: SkemaModel) {
     val c = skema
     val scope = rememberCoroutineScope()
+
+    // Keyed on the raw feed and the merge setting, because reading
+    // model.visible runs the merge and a key you have to compute first is not
+    // a key. The palette is rebuilt whenever a hue is pinned or released, so
+    // every row below it shows the re-spread that pinning caused.
+    val subjects = remember(model.events, model.settings.collapseDuplicates) {
+        subjectsOf(model.visible)
+    }
+    val palette = remember(subjects, model.settings.courseHues, c.isDark) {
+        CoursePalette(subjects.map { it.code }, model.settings.courseHues, c.isDark)
+    }
 
     Column(
         Modifier
@@ -46,7 +60,7 @@ fun SettingsScreen(model: SkemaModel) {
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            PillButton("Done", { model.screen = Screen.Agenda }, filled = true)
+            PillButton("Done", { model.screen = Screen.Calendar }, filled = true)
         }
 
         Spacer(Modifier.height(Space.large))
@@ -131,9 +145,33 @@ fun SettingsScreen(model: SkemaModel) {
                     )
                 }
                 Divider()
+                Column(Modifier.padding(Space.small)) {
+                    Text(
+                        "Calendar view",
+                        color = c.ink,
+                        fontSize = Type.normal,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Spacer(Modifier.height(Space.tight))
+                    Segmented(
+                        options = ViewMode.entries,
+                        selected = model.settings.view,
+                        label = { it.name },
+                        onSelect = { mode -> model.update { it.copy(view = mode) } },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Divider()
+                Toggle(
+                    title = "Show Saturday and Sunday",
+                    detail = "A teaching week runs Monday to Friday, so the weekend is left out and its width goes to the five days that hold something.",
+                    checked = model.settings.showWeekend,
+                    onChange = { v -> model.update { it.copy(showWeekend = v) } },
+                )
+                Divider()
                 Toggle(
                     title = "Fold duplicate entries",
-                    detail = "DTU lists most classes twice, once by the teacher and once from the room booking. Show one, with the room from the booking and the title from the teacher.",
+                    detail = "DTU lists most classes twice, once written by a teacher and once generated from the room booking. Merge the pair field by field: where the two differ the teacher's entry wins, and where it says nothing the booking fills in, which is how the rooms survive.",
                     checked = model.settings.collapseDuplicates,
                     onChange = { v -> model.update { it.copy(collapseDuplicates = v) } },
                 )
@@ -144,6 +182,34 @@ fun SettingsScreen(model: SkemaModel) {
                     checked = model.settings.refreshOnOpen,
                     onChange = { v -> model.update { it.copy(refreshOnOpen = v) } },
                 )
+            }
+        }
+
+        Spacer(Modifier.height(Space.large))
+        SectionLabel("Subjects")
+
+        Card(Modifier.fillMaxWidth(), PaddingValues(Space.small)) {
+            Column {
+                Text(
+                    if (subjects.isEmpty()) {
+                        "Courses turn up here after a sync."
+                    } else {
+                        "Every course gets a colour as far from the others as the number of courses allows. Drag a strip to choose one yourself; the rest move out of its way."
+                    },
+                    color = c.inkMuted,
+                    fontSize = Type.small,
+                    modifier = Modifier.padding(Space.small),
+                )
+                subjects.forEach { subject ->
+                    Divider()
+                    CourseColorRow(
+                        code = subject.code,
+                        label = subject.label,
+                        palette = palette,
+                        pinned = model.settings.courseHues[subject.code],
+                        onPick = { hue -> model.setHue(subject.code, hue) },
+                    )
+                }
             }
         }
 
@@ -213,4 +279,33 @@ private fun Divider() {
             .height(1.dp)
             .background(skema.hairline)
     )
+}
+
+/** One course as the settings list shows it: the code, and everything else. */
+private data class Subject(val code: String, val label: String)
+
+private fun subjectsOf(events: List<CalendarEvent>): List<Subject> {
+    val counts = events.mapNotNull { it.courseCode }.groupingBy { it }.eachCount()
+    return counts.keys.sorted().map { code ->
+        val entries = counts.getValue(code)
+        val tail = if (entries == 1) "1 entry" else entries.toString() + " entries"
+        Subject(code, listOfNotNull(nameOf(events, code), tail).joinToString(SEPARATOR))
+    }
+}
+
+/**
+ * The course's name, tidied.
+ *
+ * textFor is asked for the room booking shape on purpose: that is the branch
+ * that returns the course name as the title, with the term suffix that
+ * repeats on every single entry and the leading code already stripped off.
+ * Asking it saves duplicating that trimming here, where it would drift.
+ */
+private fun nameOf(events: List<CalendarEvent>, code: String): String? {
+    val named = events.firstOrNull {
+        it.courseCode == code && !it.location.courseName.isNullOrBlank()
+    } ?: return null
+    return textFor(named.summary, named.location.courseName, code, fromRoomBooking = true)
+        .title
+        .takeIf { it.isNotBlank() }
 }
