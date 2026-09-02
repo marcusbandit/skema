@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,13 +41,15 @@ import kotlinx.datetime.monthsUntil
 import kotlinx.datetime.plus
 
 /**
- * A month, for orientation and for jumping.
+ * A month, and under it the day you have your finger on.
  *
  * A university term is the same five days repeating, so a month of it carries
- * almost no information that the week does not carry better. Its job is to let
- * you see where you are in the term and to get you into a week two swipes
- * away, and it is built to be cheap and quiet rather than detailed: no titles,
- * no times, no scrolling. Course colour and a count are the whole vocabulary.
+ * almost no information that the week does not carry better. Its job is to
+ * let you see where you are in the term and to pick a day, and the grid is
+ * built to be cheap and quiet: no titles, no times, course colour and a count
+ * as the whole vocabulary. What the grid does not say, the day under it does.
+ * Tap a day and its classes appear below as a timeline; tap the day you are
+ * already on and the week opens around it.
  */
 
 /** Months either side of the one the view opens on. A century each way. */
@@ -66,6 +72,13 @@ private val DOT_GAP = Space.unit / 2
  * every date number in a week sitting on the same line.
  */
 private val MARK = DOT * 2
+
+/**
+ * One week of the grid, as tall as its number's disc and its dot row and the
+ * air around them. Fixed rather than a share of the height, because the day
+ * under the grid is what the rest of the height is for.
+ */
+private val ROW = DAY_DISC + Space.unit + MARK + Space.unit * 2
 
 /**
  * Space kept back for the "+n" when the dots overflow.
@@ -132,12 +145,14 @@ fun MonthView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Mo
             byDay = byDay,
             conflicts = conflicts,
             palette = palette,
-            onOpen = { date ->
-                model.select(date)
-                // Tapping a day in the month means "show me that day's week".
-                // The month is where you look to find a week, not to read one.
-                model.setView(ViewMode.Week)
+            selected = model.selected,
+            onPick = { date ->
+                // The first tap on a day is a question, answered under the
+                // grid. A second tap on the same day is the way into it: the
+                // week opens around it, which is where a day is read.
+                if (date == model.selected) model.setView(ViewMode.Week) else model.select(date)
             },
+            onEvent = { model.picked = it },
         )
     }
 }
@@ -148,7 +163,9 @@ private fun MonthPage(
     byDay: Map<LocalDate, List<CalendarEvent>>,
     conflicts: Set<Long>,
     palette: CoursePalette,
-    onOpen: (LocalDate) -> Unit,
+    selected: LocalDate,
+    onPick: (LocalDate) -> Unit,
+    onEvent: (CalendarEvent) -> Unit,
 ) {
     val c = skema
 
@@ -160,6 +177,10 @@ private fun MonthPage(
     val span = gridStart.daysUntil(next)
     val weeks = (span + WEEK - 1) / WEEK
     val reference = today()
+
+    // With the day in a rail beside the calendar the grid has the height to
+    // itself, and its weeks share it the way they used to.
+    val aside = LocalDayAside.current
 
     Column(Modifier.fillMaxSize().padding(horizontal = Space.small)) {
         Row(Modifier.fillMaxWidth().padding(bottom = Space.unit)) {
@@ -178,15 +199,11 @@ private fun MonthPage(
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.hairline))
 
-        // Rows take an equal share of whatever height is left, so five weeks
-        // and six weeks both fit exactly and nothing ever scrolls. On the
-        // unfolded 700dp frame six rows still leave every cell taller than its
-        // number and its dots.
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        BoxWithConstraints(if (aside) Modifier.weight(1f).fillMaxWidth() else Modifier.fillMaxWidth()) {
             val cell = maxWidth / WEEK
-            Column(Modifier.fillMaxSize()) {
+            Column(if (aside) Modifier.fillMaxSize() else Modifier.fillMaxWidth()) {
                 for (w in 0 until weeks) {
-                    Row(Modifier.weight(1f).fillMaxWidth()) {
+                    Row((if (aside) Modifier.weight(1f) else Modifier.height(ROW)).fillMaxWidth()) {
                         for (i in 0 until WEEK) {
                             val date = gridStart.shift(w * WEEK + i)
                             val events = byDay[date].orEmpty()
@@ -194,11 +211,12 @@ private fun MonthPage(
                                 date = date,
                                 inMonth = date >= month && date < next,
                                 isToday = date == reference,
+                                isSelected = date == selected,
                                 events = events,
                                 clash = events.any { it.startEpochSeconds in conflicts },
                                 palette = palette,
                                 width = cell,
-                                onOpen = { onOpen(date) },
+                                onOpen = { onPick(date) },
                                 modifier = Modifier.weight(1f).fillMaxHeight(),
                             )
                         }
@@ -206,17 +224,32 @@ private fun MonthPage(
                 }
             }
         }
+
+        if (aside) return@Column
+
+        // The day itself, in whatever height the grid left. It scrolls on its
+        // own, so a day with nine things on it never pushes the grid up.
+        DayTimeline(
+            date = selected,
+            events = byDay[selected].orEmpty(),
+            palette = palette,
+            onPick = onEvent,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(top = Space.medium, bottom = Space.medium),
+        )
     }
 }
 
 /**
  * One day of the grid: its number, and what is on.
  *
- * The two are one group, centred in the cell. Pinned to the top they left the
- * whole lower half of every cell empty, and since the rows take an equal share
- * of the height, the taller the frame the worse it read; a five week month on
- * an unfolded screen was a line of numbers with a hand's width of nothing
- * under each. Centring puts the group where the eye already goes.
+ * The number wears the accent disc when it is the selected day, the one whose
+ * classes are listed underneath. Today, when it is not selected, is the
+ * accent as ink only: the disc is one mark and it means "this one", and two
+ * discs in one grid would make the eye pick.
  *
  * The dot row keeps its height on a day with nothing on it, so the numbers
  * across a week still sit on one line rather than bobbing up wherever a day is
@@ -228,6 +261,7 @@ private fun MonthCell(
     date: LocalDate,
     inMonth: Boolean,
     isToday: Boolean,
+    isSelected: Boolean,
     events: List<CalendarEvent>,
     clash: Boolean,
     palette: CoursePalette,
@@ -241,22 +275,28 @@ private fun MonthCell(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        // The same pill DayHeading puts round today's number, so the marker
+        // The same disc DayHeading puts round today's number, so the marker
         // means one thing wherever it turns up.
         Box(
             Modifier
-                .background(if (isToday) c.accent else Color.Transparent, pillShape())
-                .padding(horizontal = Space.tight, vertical = 1.dp),
+                .defaultMinSize(minWidth = DAY_DISC, minHeight = DAY_DISC)
+                .background(if (isSelected) c.accent else Color.Transparent, CircleShape),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
                 date.day.toString(),
                 color = when {
-                    isToday -> c.onAccent
+                    isSelected -> c.onAccent
+                    isToday -> c.accent
                     inMonth -> c.ink
                     else -> c.inkMuted
                 },
                 fontSize = Type.normal,
-                fontWeight = if (inMonth) FontWeight.Medium else FontWeight.Normal,
+                fontWeight = when {
+                    isSelected || isToday -> FontWeight.SemiBold
+                    inMonth -> FontWeight.Medium
+                    else -> FontWeight.Normal
+                },
                 maxLines = 1,
             )
         }

@@ -322,7 +322,10 @@ private fun DualPane(
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxHeight()) {
             TopBar(model, onJump, onMenu, onTune)
-            Calendar(model, palette, Modifier.weight(1f))
+            // The rail has the day, so the month view does not list it too.
+            CompositionLocalProvider(LocalDayAside provides true) {
+                Calendar(model, palette, Modifier.weight(1f))
+            }
         }
         Box(Modifier.width(1.dp).fillMaxHeight().background(c.hairline))
         Box(Modifier.width(rail).fillMaxHeight().background(c.surface)) {

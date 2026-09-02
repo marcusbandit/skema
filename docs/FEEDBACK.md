@@ -26,6 +26,13 @@ calendar with the hamburger, the day disc and the three toolbar icons circled.
   Semesters, which is still a guess.
 - The today marker in the day strip is a true circle, like the circled "21".
 
+### Month
+- The month view should be like School Planner's: the grid on top, and under
+  it the selected day as a list drawn like a git graph. Overlapping things
+  run as lines side by side; overlapping things of the same course are a
+  branch, forked off and merged back. Done. Tap a day to list it, tap it
+  again to open its week.
+
 ### Theme
 - The status bar's clock and icons went white on the light app, because Android
   coloured them from the phone's dark mode rather than the app's. They now

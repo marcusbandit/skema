@@ -50,6 +50,14 @@ data class Frame(val width: Dp, val height: Dp) {
 val LocalFrame = staticCompositionLocalOf { Frame(411.dp, 797.dp) }
 
 /**
+ * Whether the selected day is already on screen beside the calendar, in the
+ * two pane shell's rail. The month view lists the day under its grid unless
+ * this says the rail has it, in which case the grid takes the height and
+ * the day is not drawn twice.
+ */
+val LocalDayAside = staticCompositionLocalOf { false }
+
+/**
  * How wide one day column is, and therefore how many days fit.
  *
  * Five columns is the honest week for a university: Saturday and Sunday are

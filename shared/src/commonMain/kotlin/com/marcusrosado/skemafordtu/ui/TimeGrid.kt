@@ -327,7 +327,7 @@ fun roomsLabel(rooms: List<String>, cap: Int = Int.MAX_VALUE): String {
  * above and below it, which is the smallest disc that holds two digits with
  * air around them.
  */
-private val DAY_DISC = Space.large + Space.tight
+internal val DAY_DISC = Space.large + Space.tight
 
 @Composable
 fun DayHeading(

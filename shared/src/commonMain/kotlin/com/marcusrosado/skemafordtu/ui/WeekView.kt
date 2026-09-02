@@ -830,5 +830,5 @@ private fun isPast(date: LocalDate, event: CalendarEvent, reference: LocalDate, 
     date < reference || (date == reference && event.endMinute() <= minute)
 
 /** "Monday" from the enum, so no second table of weekday names has to be kept in step. */
-private fun longWeekday(d: DayOfWeek): String =
+internal fun longWeekday(d: DayOfWeek): String =
     d.name.lowercase().replaceFirstChar { it.uppercase() }

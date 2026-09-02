@@ -161,9 +161,10 @@ private fun Fact(label: String, value: String) {
 }
 
 /**
- * What the rail shows when nothing is picked: the selected day as a list.
- * An empty pane beside a full week would be wasted width, and this is the
- * thing you most often want next to a week grid anyway.
+ * What the rail shows when nothing is picked: the selected day as the same
+ * timeline the month view draws under its grid, so the two never disagree
+ * about what a day looks like. Tapping a row picks it, and the rail turns
+ * into that event's detail.
  */
 @Composable
 fun DaySummary(
@@ -171,47 +172,11 @@ fun DaySummary(
     palette: CoursePalette,
     modifier: Modifier = Modifier,
 ) {
-    val c = skema
-    val events = model.eventsOn(model.selected)
-    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(Space.medium)) {
-        Text(
-            relativeDay(model.selected) ?: dateLabel(model.selected),
-            color = c.ink,
-            fontSize = Type.large,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(Space.small))
-
-        if (events.isEmpty()) {
-            Text("Nothing booked.", color = c.inkMuted, fontSize = Type.normal)
-            return@Column
-        }
-
-        events.forEach { event ->
-            val tint = palette.tint(event.courseCode)
-            val text = textFor(event.summary, event.location.courseName, event.courseCode, event.fromRoomBooking)
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = Space.tight),
-                verticalAlignment = Alignment.Top,
-            ) {
-                Box(Modifier.size(width = 3.dp, height = 34.dp).background(tint.rail, pillShape()))
-                Spacer(Modifier.size(Space.small))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (event.allDay) "All day" else clock(event.start),
-                        color = c.inkMuted,
-                        fontSize = Type.small,
-                    )
-                    Text(text.title, color = c.ink, fontSize = Type.normal, fontWeight = FontWeight.Medium)
-                    if (event.rooms.isNotEmpty()) {
-                        // Capped here, in full in EventDetail: this is the
-                        // glanceable list, that one is the deliberate look.
-                        Text(roomsLabel(event.rooms, cap = 3), color = c.inkMuted, fontSize = Type.small)
-                    }
-                }
-            }
-        }
-    }
+    DayTimeline(
+        date = model.selected,
+        events = model.eventsOn(model.selected),
+        palette = palette,
+        onPick = { model.picked = it },
+        modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(Space.medium),
+    )
 }
