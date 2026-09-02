@@ -7,4 +7,3 @@ dependencyResolutionManagement {
 rootProject.name = "skema"
 include(":shared")
 include(":androidApp")
-include(":desktopApp")

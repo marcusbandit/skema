@@ -1,4 +1,4 @@
-package com.marcusrosado.skemafordtu.shared
+package com.marcusrosado.skemafordtu
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -23,10 +23,10 @@ import com.marcusrosado.skemafordtu.ui.SystemBars
 import com.marcusrosado.skemafordtu.ui.skema
 
 /**
- * The whole app. Android and desktop both call this and nothing else.
+ * The whole app. The activity calls this and nothing else.
  *
- * On Android, SkemaAndroid.init(applicationContext) has to have run first,
- * because storage there needs a Context and common code cannot reach one.
+ * SkemaAndroid.init(applicationContext) has to have run first, because
+ * storage lives in the shared module, which cannot reach a Context.
  */
 @Composable
 fun App() {

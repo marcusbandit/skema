@@ -16,8 +16,10 @@ import androidx.compose.runtime.Composable
  * before the screen under it, a screen before the app. `enabled` is what
  * orders them; a disabled handler is skipped and the next one up gets it.
  *
- * The desktop has no such gesture and does nothing, which is correct rather
- * than unimplemented: a window is closed by its own chrome.
+ * Delegates to the platform's own dispatcher, so the predictive back
+ * animation Android draws is the real one rather than an imitation.
  */
 @Composable
-expect fun BackHandler(enabled: Boolean = true, onBack: () -> Unit)
+fun BackHandler(enabled: Boolean = true, onBack: () -> Unit) {
+    androidx.activity.compose.BackHandler(enabled = enabled, onBack = onBack)
+}

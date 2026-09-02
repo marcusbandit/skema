@@ -69,7 +69,7 @@ data class Slot(
  * Computed off the local fields rather than an instant, because both sides of
  * a duplicated pair are read from the same feed in the same zone.
  */
-internal fun CalendarEvent.spanMinutes(): Int? {
+fun CalendarEvent.spanMinutes(): Int? {
     val e = end ?: return null
     val days = (e.date.toEpochDays() - start.date.toEpochDays()).toInt()
     return days * 24 * 60 + (e.hour * 60 + e.minute) - (start.hour * 60 + start.minute)

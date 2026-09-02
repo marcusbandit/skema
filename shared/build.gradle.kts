@@ -1,11 +1,13 @@
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidKmpLibrary)
-    alias(libs.plugins.composeMultiplatform)
-    alias(libs.plugins.composeCompiler)
     alias(libs.plugins.serialization)
 }
 
+// Data and logic only: the ICS parser, merging, terms, the repository, the
+// settings and the session. The UI is native Android and lives in androidApp.
+// The jvm target stays so the parser tests run on the host without an
+// emulator, and because the real feed check reads a file off the host.
 kotlin {
     jvm()
     android {
@@ -13,36 +15,24 @@ kotlin {
         compileSdk = 37
         minSdk = 26
     }
-    // iOS needs a Mac to link, so it is left out. To add it back later:
-    //   listOf(iosArm64(), iosSimulatorArm64()).forEach {
-    //       it.binaries.framework { baseName = "Shared"; isStatic = true }
-    //   }
 
     sourceSets {
         commonMain.dependencies {
             implementation(libs.ktor.client.core)
             implementation(libs.kotlinx.serialization.json)
-            implementation(libs.kotlinx.datetime)
+            // api, not implementation: every event carries a LocalDateTime,
+            // so anyone holding an event needs the type.
+            api(libs.kotlinx.datetime)
             implementation(libs.kotlinx.coroutines.core)
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(libs.compose.icons.lucide)
-            implementation(libs.compose.icons.fontawesome)
         }
         commonTest.dependencies { implementation(kotlin("test")) }
-        androidMain.dependencies {
-            implementation(libs.ktor.client.okhttp)
-            // Only for BackHandler: the system back gesture is an Android
-            // concept and Compose Multiplatform 1.12 has no common one.
-            implementation(libs.androidx.activity.compose)
-        }
+        androidMain.dependencies { implementation(libs.ktor.client.okhttp) }
         jvmMain.dependencies { implementation(libs.ktor.client.cio) }
     }
 }
 
 // Lets the real-feed check find a feed without committing one:
-//   ./gradlew :shared:jvmTest -Dskema.feed=/path/to/feed.ics --info
+//   scripts/build.sh :shared:jvmTest -Dskema.feed=/path/to/feed.ics --info
 val skemaFeed = providers.systemProperty("skema.feed")
 tasks.withType<Test>().configureEach {
     if (skemaFeed.isPresent) systemProperty("skema.feed", skemaFeed.get())

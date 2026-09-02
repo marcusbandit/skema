@@ -9,6 +9,9 @@ coroutines = "1.11.0"
 activityCompose = "1.13.0"
 composeIcons = "1.1.1"
 lucideIcons = "1.1.0"
+# The Android app is plain Jetpack Compose; the BOM pins every compose artifact to one release.
+composeBom = "2025.12.01"
+lifecycle = "2.9.4"
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
@@ -17,7 +20,6 @@ composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "compose" }
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 androidApplication = { id = "com.android.application", version.ref = "agp" }
-kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 
 [libraries]
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
@@ -27,6 +29,14 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "datetime" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-foundation = { module = "androidx.compose.foundation:foundation" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+compose-material3-windowsize = { module = "androidx.compose.material3:material3-window-size-class" }
+junit = { module = "junit:junit", version = "4.13.2" }
 # Icon packs, both published as Compose Multiplatform ImageVectors, so no
 # drawable folder and nothing platform-specific to keep in step.
 compose-icons-fontawesome = { module = "br.com.devsrsouza.compose.icons:font-awesome", version.ref = "composeIcons" }
