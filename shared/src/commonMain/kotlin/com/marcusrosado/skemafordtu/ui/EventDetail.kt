@@ -178,5 +178,6 @@ fun DaySummary(
         palette = palette,
         onPick = { model.picked = it },
         modifier = modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(Space.medium),
+        ground = skema.surface,
     )
 }

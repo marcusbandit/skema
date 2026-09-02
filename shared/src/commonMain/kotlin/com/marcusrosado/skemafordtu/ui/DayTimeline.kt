@@ -36,8 +36,9 @@ import kotlinx.datetime.LocalDate
 /**
  * One day as a graph, the way a git log draws history.
  *
- * A vertical trunk runs down the day with a dot per event in the course's
- * colour, the time above the name. Two things happening at once cannot share
+ * A vertical trunk runs down the day with a dot per class in the course's
+ * colour, the time above the name, and a ring for a moment, a deadline or a
+ * release, which has a time but no length. Two things happening at once cannot share
  * a line, so the later one takes the lane beside the trunk for as long as the
  * two overlap, in its own colour: a clash reads as two lines running side by
  * side. When the two are the same course the second is not a clash but a
@@ -58,6 +59,9 @@ fun DayTimeline(
     palette: CoursePalette,
     onPick: (CalendarEvent) -> Unit,
     modifier: Modifier = Modifier,
+    // What the graph is drawn on, so a ring can be hollow: the page under
+    // the month, the rail's surface beside the week.
+    ground: Color = skema.background,
 ) {
     val c = skema
     val timed = remember(events) { events.filterNot { it.allDay } }
@@ -71,9 +75,11 @@ fun DayTimeline(
 
     // The trunk is coloured by whatever last sat on it: the line between two
     // classes wears the earlier one's colour and changes at each dot, so the
-    // whole graph is in course colours and nothing on it is grey.
+    // whole graph is in course colours and nothing on it is grey. A moment
+    // does not count as sitting on it; a deadline inside a lecture is a ring
+    // on the lecture's line, not a change of line.
     var trunk = when {
-        graph.rows.isNotEmpty() -> colourOf(0)
+        graph.rows.isNotEmpty() -> colourOf(graph.rows.firstOrNull { !it.moment }?.index ?: 0)
         allDay.isNotEmpty() -> palette.tint(allDay.first().courseCode).rail
         else -> c.hairline
     }
@@ -106,7 +112,7 @@ fun DayTimeline(
             val through = trunk
             TimelineRow(event, "All day", width, onPick) { h ->
                 drawLine(through, Offset(TRUNK_X.toPx(), 0f), Offset(TRUNK_X.toPx(), h), LINE.toPx())
-                drawCircle(tint, DOT.toPx() / 2 - LINE.toPx() / 2, Offset(TRUNK_X.toPx(), h / 2), style = Stroke(LINE.toPx()))
+                ring(tint, ground, Offset(TRUNK_X.toPx(), h / 2))
             }
         }
 
@@ -126,10 +132,10 @@ fun DayTimeline(
             // Captured per row, because the paint runs later and a var would
             // hand every row the colour the loop ended on.
             val above = trunk
-            if (placed.lane == 0) trunk = colourOf(row.index)
+            if (placed.lane == 0 && !row.moment) trunk = colourOf(row.index)
             val below = trunk
             TimelineRow(event, span, width, onPick) { h ->
-                paintRow(graph, row, h, last, carryOn, above, below, colourOf)
+                paintRow(graph, row, h, last, carryOn, above, below, ground, colourOf)
             }
         }
 
@@ -251,6 +257,7 @@ private fun DrawScope.paintRow(
     carryOn: Boolean,
     above: Color,
     below: Color,
+    ground: Color,
     colour: (Int) -> Color,
 ) {
     val stroke = LINE.toPx()
@@ -275,7 +282,16 @@ private fun DrawScope.paintRow(
     if (own.lane > 0 && carryOn) {
         drawLine(tint, Offset(x, h / 2), Offset(x, h), stroke)
     }
-    drawCircle(tint, DOT.toPx() / 2, Offset(x, h / 2))
+    // A span is a dot; a moment is a ring, hollow so the line is seen to
+    // pass through it rather than to end on it.
+    if (row.moment) ring(tint, ground, Offset(x, h / 2)) else drawCircle(tint, DOT.toPx() / 2, Offset(x, h / 2))
+}
+
+/** A hollow dot: the ground painted first, so the line behind does not show through. */
+private fun DrawScope.ring(colour: Color, ground: Color, at: Offset) {
+    val r = DOT.toPx() / 2 - LINE.toPx() / 2
+    drawCircle(ground, r, at)
+    drawCircle(colour, r, at, style = Stroke(LINE.toPx()))
 }
 
 /**
@@ -304,6 +320,8 @@ private val LINE = Space.unit / 2
 /** One row of the graph, in terms of the rows around it. */
 internal data class GraphRow(
     val index: Int,
+    /** A moment rather than a span: it starts and ends in the same minute. */
+    val moment: Boolean,
     /** The row this one forks off: an earlier, still running event of its own course, in a lower lane. */
     val forkFrom: Int?,
     /** Earlier rows still running when this one starts, whose lines pass through. */
@@ -336,6 +354,13 @@ internal data class DayGraph<T>(
  * side lane that overlaps an earlier event of its own course in a lower
  * lane; it forks from that one and merges back into it, or into the trunk
  * if the parent has ended by the time the branch does.
+ *
+ * A moment, a class that starts and ends in the same minute, occupies no
+ * time, so it is kept out of the lane layout, which would pad it to twenty
+ * minutes and have it overlap whatever it fell inside. It sits on the trunk
+ * in time order, after a class that starts as it does, takes no lane and
+ * never forks; lines still pass through its row and branches still merge
+ * on it.
  */
 internal fun <T> dayGraph(
     items: List<T>,
@@ -343,7 +368,18 @@ internal fun <T> dayGraph(
     end: (T) -> Int,
     course: (T) -> String?,
 ): DayGraph<T> {
-    val placed = Lanes.layout(items, start, end)
+    val (moments, spans) = items.partition { end(it) <= start(it) }
+    val laid = Lanes.layout(spans, start, end)
+    val marks = moments.sortedBy { start(it) }.map { Placed(it, 0, 1, start(it), start(it)) }
+    val placed = buildList {
+        var i = 0
+        var j = 0
+        while (i < laid.size || j < marks.size) {
+            val spanFirst = j == marks.size ||
+                (i < laid.size && laid[i].startMinute <= marks[j].startMinute)
+            add(if (spanFirst) laid[i++] else marks[j++])
+        }
+    }
     val n = placed.size
 
     fun runningAt(row: Int): List<Int> =
@@ -372,6 +408,7 @@ internal fun <T> dayGraph(
         }
         GraphRow(
             index = i,
+            moment = placed[i].endMinute <= placed[i].startMinute,
             forkFrom = forkFrom[i],
             through = runningAt(i),
             merges = merges,

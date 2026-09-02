@@ -37,6 +37,9 @@ calendar with the hamburger, the day disc and the three toolbar icons circled.
   day runs on beside the trunk into a tail; checked on 4 September 2025.
 - The theme picker is a monitor, a sun and a moon, not three words. Done,
   in the sheet and on the Settings screen.
+- A class that starts and ends in the same minute, 3 September 2025 has
+  two, should look controlled. Done: it is a hollow ring on the line, one
+  time, no lane, no fork, and it does not recolour the line.
 
 ### Theme
 - The status bar's clock and icons went white on the light app, because Android

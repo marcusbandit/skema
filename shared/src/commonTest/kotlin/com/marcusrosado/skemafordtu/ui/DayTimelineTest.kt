@@ -84,6 +84,34 @@ class DayTimelineTest {
     }
 
     @Test
+    fun aMomentSitsOnTheTrunkAndTakesNoLane() {
+        // A release stamp inside a lecture of its own course, and another
+        // right as the lecture ends: both on the trunk, neither a branch,
+        // no lane opened, and the twenty minute padding a class gets does
+        // not apply to them.
+        val g = graph(Ev(900, 1020, "A"), Ev(1005, 1005, "A"), Ev(1020, 1020, "A"))
+        assertEquals(1, g.lanes)
+        assertTrue(g.rows.all { it.forkFrom == null })
+        assertEquals(listOf(false, true, true), g.rows.map { it.moment })
+        assertTrue(g.openBranches.isEmpty())
+        assertTrue(g.openLanes.isEmpty())
+    }
+
+    @Test
+    fun aClassGoesAheadOfAMomentThatStartsAsItDoes() {
+        val g = graph(Ev(780, 780, "B"), Ev(780, 900, "A"))
+        assertEquals(listOf(false, true), g.rows.map { it.moment })
+    }
+
+    @Test
+    fun aBranchStillMergesOnAMomentsRow() {
+        // The lab ends at 10:00; the next row is a deadline at 11:00, and
+        // that is where the lab comes home.
+        val g = graph(Ev(480, 720, "A"), Ev(540, 600, "A"), Ev(660, 660, "B"))
+        assertEquals(listOf(1 to 0), g.rows[2].merges)
+    }
+
+    @Test
     fun continuesSaysWhetherTheLineGoesOnBelowTheDot() {
         // The first runs past the second's start; the second does not run
         // past the third's.
