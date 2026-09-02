@@ -46,8 +46,19 @@ fun CalendarEvent.endMinute(): Int {
     val raw = e.hour * 60 + e.minute
     // An event that ends past midnight reports a smaller number than it
     // started at. Clamp to the end of the day rather than drawing it upwards.
-    return if (raw <= startMinute()) 24 * 60 else raw
+    // Strictly smaller: an end equal to the start is a marker, and clamping
+    // that too drew every "Available" stamp at 00:01 as a block to midnight.
+    return if (raw < startMinute()) 24 * 60 else raw
 }
+
+/**
+ * A stamp rather than a session. DTU writes deadlines and release times as
+ * events with no length, "Hand-in 1 - Due" at 20:00, "Uge 5 - Available" at
+ * 00:01. They mark a moment and occupy none of the day, which is why they
+ * never grow the grid's window, and why one the grid does not reach sits in
+ * the strip above it instead.
+ */
+fun CalendarEvent.isMarker(): Boolean = !allDay && end != null && end == start
 
 /**
  * All the app's state in one object, held by remember{} at the root. No

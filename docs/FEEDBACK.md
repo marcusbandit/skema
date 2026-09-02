@@ -24,6 +24,17 @@ calendar with the hamburger, the day disc and the three toolbar icons circled.
   guesses at what those controls should do here; the owner has not said.
 - The today marker in the day strip is a true circle, like the circled "21".
 
+### Time grid
+- Show 07:00 to 18:00 by default. Anything on the schema outside that is
+  shown, and the grid for that day or week grows to hold it. Done. The week
+  grows once the swipe lands, not under a moving finger.
+- Not agreed with the owner: the feed's only entries outside those hours
+  are zero length "Due" and "Available" stamps, 41 of them, and letting
+  those grow the grid would open most spring weeks at midnight. So a stamp
+  never grows the grid; one the grid does not reach sits in the strip above
+  it, beside the whole day entries. If a stamp should grow the grid after
+  all, that is one filter in DayWindow.around.
+
 ## Round three, 2026-09-02, not yet done
 
 ### Header

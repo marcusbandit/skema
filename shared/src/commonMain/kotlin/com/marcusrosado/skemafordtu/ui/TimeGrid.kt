@@ -41,15 +41,20 @@ import kotlin.math.min
  */
 
 /**
- * The day the grid plots against, which is all of it.
+ * The hours the grid plots.
  *
- * This used to be derived from the events, padded an hour either side and
- * grown to a minimum span. That produced a grid that started at 07:00 on one
- * week and 09:00 on another, and ended wherever the last booking happened to
- * be, so the same 13:00 sat at a different height depending on what else was
- * in view. Half a day is not a day. The window is now midnight to midnight,
- * always, and finding the part you care about is the zoom's job and the
- * opening scroll's job, not the window's.
+ * 07:00 to 18:00 by default: the teaching day, with an hour's air either
+ * side of the 08:00 to 17:00 DTU actually timetables. A day or a week with
+ * something outside that grows, in whole hours, until it holds it. A 19:00
+ * exercise class closes the grid at 20:00 that week and nowhere else.
+ *
+ * The window went midnight to midnight for a while, on the argument that a
+ * grid cut to its events put the same 13:00 at a different height on every
+ * page. That is still true across the pages that grow, and it is paid on
+ * purpose: a fixed day is 24 rows with 13 of them empty on every page, and
+ * the owner would rather the eleven that matter filled the screen. What the
+ * old argument keeps is that the default is fixed rather than fitted, so two
+ * ordinary weeks still line up exactly.
  */
 data class DayWindow(val startHour: Int, val endHour: Int) {
 
@@ -65,12 +70,43 @@ data class DayWindow(val startHour: Int, val endHour: Int) {
     fun spanOf(fromMinute: Int, toMinute: Int, hourHeight: Float): Dp =
         (((toMinute - fromMinute).coerceAtLeast(Lanes.MIN_MINUTES)) / 60f * hourHeight).dp
 
+    /** Whether a minute of the day has an hour on this grid to sit in. */
+    fun holds(minute: Int): Boolean = minute >= startMinute && minute < endHour * 60
+
     companion object {
-        /** Midnight to midnight. The only window there is. */
+        /** Midnight to midnight, the most a window can be. */
         val FULL = DayWindow(0, 24)
 
-        /** Kept so call sites read the same; the events no longer decide. */
-        fun of(@Suppress("UNUSED_PARAMETER") events: List<CalendarEvent>): DayWindow = FULL
+        /** The teaching day, and what a grid shows until something falls outside it. */
+        val DEFAULT = DayWindow(7, 18)
+
+        /**
+         * The default, grown to take in every event that occupies time. A
+         * marker does not: this feed's only entries outside the teaching
+         * day are "Due" stamps at 23:59 and "Available" stamps at 00:01,
+         * and letting those grow the grid would open most spring weeks at
+         * midnight for the sake of a hairline. They go in the strip instead.
+         */
+        fun around(events: List<CalendarEvent>): DayWindow =
+            holding(
+                events
+                    .filterNot { it.allDay || it.isMarker() }
+                    .flatMap { listOf(it.startMinute(), it.endMinute()) },
+            )
+
+        /**
+         * The default, grown to hold every minute given. In whole hours,
+         * because the gutter is labelled in them: a 06:30 start opens the
+         * grid at 06:00 and an 18:30 end closes it at 19:00. A minute on the
+         * boundary needs no growing; 18:00 is the end of the default and
+         * an event ending then is already inside it.
+         */
+        fun holding(minutes: List<Int>): DayWindow {
+            if (minutes.isEmpty()) return DEFAULT
+            val start = min(DEFAULT.startHour, minutes.min() / 60).coerceAtLeast(FULL.startHour)
+            val end = max(DEFAULT.endHour, ceil(minutes.max() / 60f).toInt()).coerceAtMost(FULL.endHour)
+            return DayWindow(start, end)
+        }
 
         /**
          * Where to park the scroll when a day first appears: the earliest
@@ -79,12 +115,32 @@ data class DayWindow(val startHour: Int, val endHour: Int) {
          * midnight, because midnight is never what you wanted to look at.
          */
         fun openingMinute(events: List<CalendarEvent>): Int {
-            val timed = events.filterNot { it.allDay }
+            val timed = events.filterNot { it.allDay || it.isMarker() }
             val first = timed.minOfOrNull { it.startMinute() } ?: (8 * 60)
             return (first - 60).coerceIn(0, 23 * 60)
         }
     }
 }
+
+/**
+ * Whether an event belongs in the strip above the grid rather than on it: a
+ * whole day entry always, and a marker whose moment the grid does not reach.
+ * A deadline at 23:59 is still that day's deadline when the day on screen
+ * ends at 18:00; it just has no hour to sit on, so it sits with the things
+ * that never had one.
+ */
+fun CalendarEvent.inStrip(window: DayWindow): Boolean =
+    allDay || (isMarker() && !window.holds(startMinute()))
+
+/**
+ * How long a scroll correction will wait for the grid to be measured at its
+ * new height before it gives up and scrolls anyway. Wanted by an anchored
+ * zoom, and by a window that has just grown at the top.
+ *
+ * A few frames. The wait normally ends on the first one; the bound is there so
+ * a rounding mismatch cannot leave the correction pending forever.
+ */
+internal const val MEASURE_WAIT_MS = 120L
 
 /**
  * How often to print an hour label.

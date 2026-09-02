@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.marcusrosado.skemafordtu.data.ViewMode
 import com.marcusrosado.skemafordtu.ics.CalendarEvent
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.DayOfWeek
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.daysUntil
@@ -165,12 +166,17 @@ fun WeekView(
 
     val week = weekStart(model.anchor)
 
-    // Midnight to midnight, every week, so the same 13:00 is at the same height
-    // whatever else is in the feed. Every page shares it, which is also what
-    // keeps the page sliding in level with the page sliding out and stops two
-    // pages arguing over the extent of the shared scroll.
-    val window = DayWindow.FULL
-    val allDay = remember(byDay, week, dayCount) { anyAllDayAround(byDay, week, dayCount) }
+    // The settled week's window: the teaching day, grown to hold whatever
+    // that week has outside it. Every page draws on it, which is what keeps
+    // the page sliding in level with the page sliding out and stops two
+    // pages arguing over the extent of the shared scroll. The price is that
+    // a neighbour with an evening class shows it cut off until the swipe
+    // lands and the window is asked again for the new week. The height then
+    // changes at rest, never under a moving finger.
+    val window = remember(byDay, week, dayCount) {
+        DayWindow.around(List(dayCount) { week.shift(it) }.flatMap { byDay[it].orEmpty() })
+    }
+    val allDay = remember(byDay, week, dayCount, window) { anyStripAround(byDay, week, dayCount, window) }
 
     val vScroll = rememberScrollState()
     val hScroll = rememberScrollState()
@@ -242,6 +248,27 @@ fun WeekView(
         val to = wanted ?: return@LaunchedEffect
         vScroll.scrollTo(to.roundToInt().coerceAtLeast(0))
         wanted = null
+    }
+
+    // The window can move under the scroll: the settled week changes, or a
+    // sync adds an early class. Growing at the bottom costs nothing. Growing
+    // at the top pushes every hour down by the rows added, so the scroll
+    // moves by the same amount and the clock on screen stays where it was.
+    var windowStart by remember { mutableIntStateOf(window.startHour) }
+    LaunchedEffect(window.startHour) {
+        val rows = windowStart - window.startHour
+        windowStart = window.startHour
+        if (rows == 0) return@LaunchedEffect
+        val delta = with(density) { (rows * hourHeight).dp.roundToPx() }
+        val target = (vScroll.value + delta).coerceAtLeast(0)
+        // scrollTo clamps against the height the grid was last measured at,
+        // and the taller grid is a frame away, so a move down waits for it.
+        if (target > vScroll.maxValue) {
+            withTimeoutOrNull(MEASURE_WAIT_MS) {
+                snapshotFlow { vScroll.maxValue }.first { it >= target }
+            }
+        }
+        vScroll.scrollTo(target)
     }
 
     // Changing how many days fit changes how wide each one is, by exactly the
@@ -413,7 +440,7 @@ private fun WeekPage(
                 Row(slide) {
                     days.forEach { d ->
                         AllDayCell(
-                            entries = byDay[d].orEmpty().filter { it.allDay },
+                            entries = byDay[d].orEmpty().filter { it.inStrip(window) },
                             palette = palette,
                             width = columnWidth,
                             onPick = onPick,
@@ -581,7 +608,7 @@ private fun DayColumn(
 ) {
     val c = skema
     val density = LocalDensity.current
-    val timed = remember(events) { events.filterNot { it.allDay } }
+    val timed = remember(events, window) { events.filterNot { it.inStrip(window) } }
 
     // Both arrangements, cached on the day's events. Which one is drawn is a
     // question about width and width moves with the zoom, so the decision sits
@@ -758,18 +785,19 @@ private fun Hairline() {
 }
 
 /**
- * Whether the all day strip is worth its height. Asked over the week either
- * side as well as the anchor week, because the strip appearing halfway through
- * a swipe would shorten one page's grid and not the other's.
+ * Whether the strip above the grid is worth its height. Asked over the week
+ * either side as well as the anchor week, because the strip appearing halfway
+ * through a swipe would shorten one page's grid and not the other's.
  */
-private fun anyAllDayAround(
+private fun anyStripAround(
     byDay: Map<LocalDate, List<CalendarEvent>>,
     week: LocalDate,
     dayCount: Int,
+    window: DayWindow,
 ): Boolean = (-NEIGHBOUR_WEEKS..NEIGHBOUR_WEEKS).any { w ->
-    // Only the days actually drawn: a Saturday marker must not buy the strip
+    // Only the days actually drawn: a Saturday entry must not buy the strip
     // for a five day week that never shows Saturday.
-    (0 until dayCount).any { d -> byDay[week.shift(w * 7 + d)].orEmpty().any { it.allDay } }
+    (0 until dayCount).any { d -> byDay[week.shift(w * 7 + d)].orEmpty().any { it.inStrip(window) } }
 }
 
 /**
@@ -794,7 +822,7 @@ private fun openingMinute(
     if (reference !in days) return DayWindow.openingMinute(whole)
     // An evening with nothing left in it falls back to the week, so the grid
     // still opens on teaching hours rather than on the small hours.
-    val ahead = byDay[reference].orEmpty().filter { !it.allDay && it.endMinute() > minute }
+    val ahead = byDay[reference].orEmpty().filter { !it.allDay && !it.isMarker() && it.endMinute() > minute }
     return DayWindow.openingMinute(ahead.ifEmpty { whole })
 }
 

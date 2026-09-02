@@ -395,7 +395,6 @@ private fun Empty(title: String, detail: String) {
 /** Monday to Friday. The weekend is added only when a semester puts something there. */
 private const val TEACHING_DAYS = 5
 
-private const val HOURS_IN_DAY = 24
 
 /** Air either side of a block, as a share of its column. The week view's rule. */
 private const val BLOCK_AIR = 0.02f
@@ -441,16 +440,11 @@ private fun TypicalGrid(slots: List<Slot>, palette: CoursePalette, modifier: Mod
     // weekday names are got without keeping a second table of them.
     val monday = remember { weekStart(today()) }
 
-    // The teaching day this semester has, rather than the whole twenty four
-    // hours. The week view plots midnight to midnight because its pages have
-    // to agree with each other as they slide past; there is one grid here and
-    // nothing for it to agree with, and this screen exists to show the shape
-    // of a week at a glance, so it crops to the hours that hold something.
+    // The calendar's own window rule: the teaching day, grown to hold
+    // whatever this semester's week has outside it. Same rule, so the
+    // typical week and the real one put 13:00 at the same height.
     val window = remember(slots) {
-        DayWindow(
-            startHour = slots.minOf { it.startMinute } / 60,
-            endHour = ceil(slots.maxOf { it.endMinute } / 60f).toInt().coerceAtMost(HOURS_IN_DAY),
-        )
+        DayWindow.holding(slots.flatMap { listOf(it.startMinute, it.endMinute) })
     }
 
     val hScroll = rememberScrollState()

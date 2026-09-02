@@ -108,15 +108,6 @@ private val CASCADE_HEADER = LINE + BLOCK_PAD
  */
 private const val CASCADE_SHARE = 0.34f
 
-/**
- * How long an anchored zoom will wait for the grid to be measured at its new
- * hour height before it gives up and scrolls anyway.
- *
- * A few frames. The wait normally ends on the first one; the bound is there so
- * a rounding mismatch cannot leave the correction pending forever.
- */
-private const val MEASURE_WAIT_MS = 120L
-
 @Composable
 fun DayView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Modifier) {
     val c = skema
@@ -210,13 +201,12 @@ private fun DayPage(
     val c = skema
     val density = LocalDensity.current
 
-    // Midnight to midnight, whatever is on. The window used to be derived from
-    // the day's events, which put the same 13:00 at a different height on
-    // every day of the week; finding the part you care about is now the
-    // opening scroll's job and the zoom's job.
-    val window = DayWindow.FULL
-    val timed = remember(events) { events.filterNot { it.allDay } }
-    val allDay = remember(events) { events.filter { it.allDay } }
+    // The teaching day, grown to hold whatever this day has outside it. Each
+    // page is its own scroller, so a day with an evening class is simply a
+    // taller page, and the days either side of it are not.
+    val window = remember(events) { DayWindow.around(events) }
+    val timed = remember(events, window) { events.filterNot { it.inStrip(window) } }
+    val strip = remember(events, window) { events.filter { it.inStrip(window) } }
 
     // Both arrangements, because which one is right depends on the column
     // width, and the width is only known further down inside the grid.
@@ -229,8 +219,8 @@ private fun DayPage(
 
     val scroll = rememberScrollState()
 
-    // Open on the interesting part of the day. A full day grid parked at its
-    // top is six hours of empty rules, so the scroll starts at the clock on
+    // Open on the interesting part of the day. A grid parked at its top can
+    // be hours of empty rules, so the scroll starts at the clock on
     // today and at the first event on any other day, each backed off by an
     // hour so the target is not welded to the top edge. Once per day: a sync
     // arriving later must not yank the scroll out from under a finger.
@@ -296,8 +286,8 @@ private fun DayPage(
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(Modifier.widthIn(max = Grid.GUTTER + MAX_COLUMN).fillMaxSize()) {
-            if (allDay.isNotEmpty()) {
-                AllDayStrip(allDay, palette, onPick)
+            if (strip.isNotEmpty()) {
+                AllDayStrip(strip, palette, onPick)
                 Box(Modifier.fillMaxWidth().height(1.dp).background(c.hairline))
             }
             Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll)) {
@@ -337,7 +327,10 @@ private fun DayPage(
 private fun openingMinute(date: LocalDate, events: List<CalendarEvent>): Int {
     if (date != today()) return DayWindow.openingMinute(events)
     val now = nowMinutes()
-    val next = events.filterNot { it.allDay }.filter { it.endMinute() > now }.minOfOrNull { it.startMinute() }
+    val next = events
+        .filterNot { it.allDay || it.isMarker() }
+        .filter { it.endMinute() > now }
+        .minOfOrNull { it.startMinute() }
     // The next unfinished event, not the earlier of it and the clock: taking
     // the earlier is what parks 02:38 on an empty night when the day's first
     // class is at 13:00. An event already running reports a start behind the
@@ -443,7 +436,9 @@ private fun DayGrid(
 /**
  * A whole day entry. It has no start, no end and no place on a time axis, so
  * putting it in the grid means inventing a time for it. It goes in a strip
- * above instead, which is also where a reader looks for "true all day".
+ * above instead, which is also where a reader looks for "true all day". A
+ * marker the grid does not reach, a deadline at 23:59 on a day that ends at
+ * 18:00 on screen, joins it there.
  */
 @Composable
 private fun AllDayStrip(
