@@ -12,7 +12,7 @@ set -euo pipefail
 SDK="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
 export ANDROID_AVD_HOME="${ANDROID_AVD_HOME:-$HOME/.config/.android/avd}"
 export ANDROID_SDK_HOME="${ANDROID_SDK_HOME:-$HOME/.config/.android}"
-AVD="${SKEMA_AVD:-skema_fold}"
+AVD="${SKEMA_AVD:-skema_fold10}"
 
 MIN_FREE_MB=5000
 avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)

@@ -8,15 +8,19 @@ import androidx.compose.ui.unit.dp
 /**
  * What the app knows about the space it has been given.
  *
- * The Pixel Fold this is built for is two devices behind one app: folded it
- * is 411 x 797 dp, unfolded it is 841 x 700 dp. Wider AND shorter, which is
- * the part that catches people out. A layout that only asks "is this a phone
- * or a tablet" gets the unfolded state right and then runs the week grid off
- * the bottom of the screen, because it assumed more width meant more height.
+ * The device this is built for is two devices behind one app, and the two are
+ * not related the way people assume. Measured on the Pixel 10 Pro Fold at
+ * 390dpi, off the running device rather than off the profile: folded it is
+ * 1080 x 2364 px, 443 x 970 dp; unfolded 2076 x 2152 px, 852 x 883 dp.
+ * Unfolding buys 409dp of width and COSTS 87dp of height, so a layout that
+ * treats "bigger" as one axis gets the unfolded state wrong. The previous generation is different again,
+ * 411 x 797 folded and 841 x 701 unfolded, where unfolding buys width and
+ * COSTS height.
  *
- * So nothing in the app branches on a device or a posture. It branches on the
- * two numbers below, which means the desktop window gets the same treatment
- * for free and a resize is the same event as a fold.
+ * Between those two the only safe assumption is that there is none, which is
+ * why nothing in the app branches on a device or a posture. It branches on
+ * the two numbers below, so both foldables, a rotation and a desktop window
+ * resize are all the same event.
  */
 @Immutable
 data class Frame(val width: Dp, val height: Dp) {
@@ -28,14 +32,14 @@ data class Frame(val width: Dp, val height: Dp) {
     /**
      * A second pane from the medium break, not the expanded one.
      *
-     * Measured on the Pixel Fold AVD at 420dpi: folded is 411 x 797 dp, and
-     * unfolded is 841 x 701 dp in the panel's natural landscape. Rotate that
-     * unfolded screen to portrait and it is 701 x 841, which is the same
-     * device showing the same inner display. A 840dp threshold would give it
-     * two panes lying down and one standing up, which is the fold working
-     * only half the time. 600dp is where a list and a detail genuinely fit
-     * side by side, and it puts both unfolded orientations on the same side
-     * of the line while leaving the folded phone well clear of it.
+     * A 840dp threshold fails on both generations. On the older Fold the
+     * unfolded screen is 841 x 701 lying down and 701 x 841 standing up, so
+     * it would get two panes one way up and one the other, which is the fold
+     * working half the time. On the Pixel 10 Pro Fold the unfolded screen is
+     * 852 x 883, which clears 840 only just, and its folded screen is 443dp.
+     * 600dp is where a list and a detail genuinely fit side by side, and it
+     * puts every unfolded orientation of both devices on one side of the line
+     * while leaving both folded screens well clear of the other.
      */
     val dual: Boolean get() = width >= 600.dp
 

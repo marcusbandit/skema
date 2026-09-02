@@ -18,7 +18,9 @@ import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.ChevronUp
 import com.composables.icons.lucide.CircleAlert
 import com.composables.icons.lucide.Clock
+import com.composables.icons.lucide.Columns3
 import com.composables.icons.lucide.Database
+import com.composables.icons.lucide.Grid3x3
 import com.composables.icons.lucide.Layers
 import com.composables.icons.lucide.LayoutGrid
 import com.composables.icons.lucide.Link2
@@ -26,9 +28,12 @@ import com.composables.icons.lucide.List
 import com.composables.icons.lucide.LocateFixed
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.MapPin
+import com.composables.icons.lucide.Menu
 import com.composables.icons.lucide.Palette
+import com.composables.icons.lucide.RectangleVertical
 import com.composables.icons.lucide.RefreshCw
 import com.composables.icons.lucide.RotateCcw
+import com.composables.icons.lucide.Rows3
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.SlidersHorizontal
@@ -57,6 +62,13 @@ enum class Ico {
 
     // Added for the settings screen: its section headings and its rows.
     Link, Tune, Storage, Trash, Warn, Theme, Layout, Fold,
+
+    // Added for the sidebar. The four views again, drawn as what they lay out
+    // rather than as calendars, plus the control that opens the sidebar when
+    // it is a drawer. Separate members from Month/Week/Day above because those
+    // four are calendars wherever they appear, and the settings screen leans
+    // on that: Ico.Day marks an enrolment date, not the day view.
+    ViewMonth, ViewWeek, ViewDay, ViewAgenda, Menu,
 }
 
 /**
@@ -110,6 +122,21 @@ private val Ico.vector: ImageVector
         // Warn is a caution, not a verdict: it sits on paper beside muted
         // status text, so it stays in the outline alphabet.
         Ico.Warn -> Lucide.CircleAlert
+
+        // The sidebar's four, in Google Calendar's vocabulary: one column for
+        // the day, several for the week, a grid for the month, stacked rows
+        // for the agenda. Three of them are literally the same 24px rounded
+        // frame with different lines drawn inside it, and the fourth is that
+        // frame narrowed to a single column, so the set reads as one alphabet
+        // saying one thing, which is how many pieces the screen is cut into.
+        // A calendar glyph cannot say that: four calendars side by side all
+        // read as "calendar" first and the difference second.
+        Ico.ViewMonth -> Lucide.Grid3x3
+        Ico.ViewWeek -> Lucide.Columns3
+        Ico.ViewDay -> Lucide.RectangleVertical
+        Ico.ViewAgenda -> Lucide.Rows3
+
+        Ico.Menu -> Lucide.Menu
 
         // The two verdicts.
         Ico.Check -> FontAwesomeIcons.Solid.Check

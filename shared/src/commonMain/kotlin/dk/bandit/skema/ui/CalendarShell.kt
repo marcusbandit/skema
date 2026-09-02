@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import dk.bandit.skema.data.ViewMode
 import dk.bandit.skema.ics.CalendarEvent
+import dk.bandit.skema.ics.Season
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -77,7 +78,7 @@ import kotlin.time.Duration.Companion.minutes
  * leaving accelerate away and take less. An entrance is worth watching, an
  * exit is only in the way of what you asked for.
  */
-private object Motion {
+internal object Motion {
 
     /** Emphasised decelerate: most of the distance early, the last bit slow. */
     val arrive = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
@@ -139,22 +140,23 @@ private const val PARTIAL = 0.5f
  * above the drift left at the end of a careful drag and well below a
  * deliberate flick.
  */
-private val FLICK = 400.dp
+internal val FLICK = 400.dp
 
 /**
  * The chrome around whichever calendar is showing, and the one place that
  * decides how the screen is divided.
  *
- * There is exactly one branch on size in the whole app and it is here. A wide
- * frame gets two panes, a narrow one gets a single pane with a sheet. Both
- * read the same model, so unfolding the phone moves the detail from a sheet
- * into a rail and changes nothing else: same day, same zoom, same selection,
- * no reload. That is what makes the fold seamless rather than a restart.
+ * Two branches on size in the whole app and both are here. The first spends
+ * width on the sidebar: wide enough and it is a rail that is always there,
+ * otherwise a drawer that comes over the calendar when it is asked for. The
+ * second spends what is left on panes. Both read the same model, so unfolding
+ * the phone moves the detail from a sheet into a rail and the menu from a
+ * drawer into a strip, and changes nothing else: same day, same zoom, same
+ * selection, no reload. That is what makes the fold seamless rather than a
+ * restart.
  */
 @Composable
-fun CalendarShell(model: SkemaModel) {
-    val dark = skema.isDark
-
+fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
     // Syncing is not a button any more. An app that knows its data has a
     // shelf life should not make you press refresh to find out; it fetches
     // when it opens and then on a timer, and the status line under the
@@ -170,41 +172,101 @@ fun CalendarShell(model: SkemaModel) {
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val frame = Frame(maxWidth, maxHeight)
+        val window = Frame(maxWidth, maxHeight)
 
-        // Rebuilt only when the course set, the pinned hues or the theme
-        // change. The hue assignment re-spreads every course, so doing this
-        // per frame would be visible work for no reason.
-        val palette = remember(model.courseCodes, model.settings.courseHues, dark) {
-            CoursePalette(model.courseCodes, model.settings.courseHues, dark)
-        }
+        // A rail is width the calendar never gets back, so everything after
+        // this measures itself against the frame MINUS the rail. Deciding two
+        // panes on the window and then drawing them into less than the window
+        // is exactly how a day column ends up off the edge.
+        val railed = window.width >= RAIL_FROM
+        val frame = if (railed) window.copy(width = window.width - RAIL_WIDTH) else window
+
+        // Whether the month picker is up. It lives here rather than in the top
+        // bar because it covers the whole frame, and on a two pane screen the
+        // top bar is a third of it.
+        var jumping by remember { mutableStateOf(false) }
+
+        // The drawer is the narrow presentation of the same sidebar. Growing
+        // into a rail closes it, so folding back never reveals a menu left
+        // open in a posture that had no menu to open.
+        var menuOpen by remember { mutableStateOf(false) }
+        LaunchedEffect(railed) { if (railed) menuOpen = false }
 
         CompositionLocalProvider(LocalFrame provides frame) {
-            if (frame.dual) DualPane(model, palette, frame) else SinglePane(model, palette)
+            Row(Modifier.fillMaxSize()) {
+                if (railed) SidebarRail(model, Modifier.width(RAIL_WIDTH).fillMaxHeight())
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    // A rail is already on screen, so the top bar gets a menu
+                    // control only when there is something to open.
+                    val onMenu = if (railed) null else ({ menuOpen = true })
+                    if (frame.dual) {
+                        DualPane(model, palette, frame, onMenu, onJump = { jumping = true })
+                    } else {
+                        SinglePane(model, palette, onMenu, onJump = { jumping = true })
+                    }
+                }
+            }
+        }
+
+        // Over the content rather than inside it: the drawer covers the top
+        // bar it was opened from, the way a drawer does.
+        SidebarDrawer(model, open = menuOpen, onDismiss = { menuOpen = false })
+
+        // Composed only while it is wanted. The panel plays its own way out
+        // before it calls back, which is why dismissing it is a callback and
+        // not this flag going false on the tap.
+        if (jumping) {
+            val years = jumpYears(model)
+            MonthYearSheet(
+                // The day view is anchored on the selected day rather than on
+                // the anchor, so the picker opens on the month you can see.
+                initial = if (model.view == ViewMode.Day) model.selected else model.anchor,
+                minYear = years.first,
+                maxYear = years.last,
+                onPick = { model.select(it) },
+                onDismiss = { jumping = false },
+            )
         }
     }
 }
 
+/**
+ * Which years the jump picker offers.
+ *
+ * Bounded by what the student actually has: the enrolment date and the feed's
+ * own semesters, widened to take in today and wherever the calendar is parked,
+ * so the year you are on is always in the list. A Fall term runs into January,
+ * so it reaches one year past its own. Nobody is scrolling to 1970.
+ */
+private fun jumpYears(model: SkemaModel): IntRange {
+    val marks = buildList {
+        add(today().year)
+        add(model.anchor.year)
+        add(model.selected.year)
+        model.enrolledFrom?.let { add(it.year) }
+        model.terms.firstOrNull()?.let { add(it.year) }
+        model.terms.lastOrNull()?.let { add(if (it.season == Season.Fall) it.year + 1 else it.year) }
+    }
+    return marks.min()..marks.max()
+}
+
 @Composable
-private fun DualPane(model: SkemaModel, palette: CoursePalette, frame: Frame) {
+private fun DualPane(
+    model: SkemaModel,
+    palette: CoursePalette,
+    frame: Frame,
+    onMenu: (() -> Unit)?,
+    onJump: () -> Unit,
+) {
     val c = skema
     // A third of the width, floored so the rail can hold a room list and
     // capped so the week never loses the space it actually needs.
     val rail = (frame.width * 0.32f).coerceIn(260.dp, 380.dp)
 
-    // The top bar lives in the LEFT PANE, not the window, so what fits in it
-    // is the pane's width minus the rail. Unfolded that is about 571dp, and a
-    // four way switcher plus two buttons leaves the month name roughly 60dp,
-    // which is how "Aug to Sep" became "Aug to". Below this the switcher goes
-    // back to the bottom where it has a row of its own.
-    val pane = frame.width - rail - 1.dp
-    val inline = pane >= 640.dp
-
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            TopBar(model, inlineSwitcher = inline)
+            TopBar(model, onMenu, onJump)
             Calendar(model, palette, Modifier.weight(1f))
-            if (!inline) ViewSwitcher(model, Modifier.fillMaxWidth().padding(Space.small))
         }
         Box(Modifier.width(1.dp).fillMaxHeight().background(c.hairline))
         Box(Modifier.width(rail).fillMaxHeight().background(c.surface)) {
@@ -224,14 +286,16 @@ private fun DualPane(model: SkemaModel, palette: CoursePalette, frame: Frame) {
 }
 
 @Composable
-private fun SinglePane(model: SkemaModel, palette: CoursePalette) {
+private fun SinglePane(
+    model: SkemaModel,
+    palette: CoursePalette,
+    onMenu: (() -> Unit)?,
+    onJump: () -> Unit,
+) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(model, inlineSwitcher = false)
+            TopBar(model, onMenu, onJump)
             Calendar(model, palette, Modifier.weight(1f))
-            // The switcher sits at the bottom on a phone because that is
-            // where a thumb is, and folded this app is a tall phone.
-            ViewSwitcher(model, Modifier.fillMaxWidth().padding(Space.small))
         }
         // Always composed, never conditional: a sheet that is removed from
         // the tree the instant it is dismissed has nothing left to animate.
@@ -306,35 +370,75 @@ private fun CalendarBody(model: SkemaModel, palette: CoursePalette) {
 }
 
 @Composable
-private fun TopBar(model: SkemaModel, inlineSwitcher: Boolean) {
+private fun TopBar(model: SkemaModel, onMenu: (() -> Unit)?, onJump: () -> Unit) {
     val c = skema
+
+    // The headline is a date, and a date is somewhere you can go. Agenda is
+    // the exception: it is not showing a month, so it has no month to jump to.
+    val jumpable = model.view != ViewMode.Agenda
 
     Column(Modifier.fillMaxWidth().padding(horizontal = Space.medium, vertical = Space.small)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            // Passed in rather than decided here, because whether there is
+            // anything to open is a question about the width of the window and
+            // the top bar only knows the width of its own pane.
+            if (onMenu != null) {
+                GlyphButton(Ico.Menu, "Views and settings", onMenu)
+                Spacer(Modifier.width(Space.small))
+            }
+
             Column(Modifier.weight(1f)) {
-                Text(
-                    headline(model),
-                    color = c.ink,
-                    fontSize = Type.large,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                )
+                Row(
+                    // Pulled back by its own padding, so the headline still
+                    // starts on the same line as the subhead under it: the
+                    // padding is there to give the tap something to land on,
+                    // not to indent the title.
+                    Modifier
+                        .offset(x = -Space.tight)
+                        .clip(pillShape())
+                        .clickable(enabled = jumpable, onClick = onJump)
+                        .padding(horizontal = Space.tight, vertical = Space.unit),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        headline(model),
+                        // Weighted so the chevron is measured first. Without
+                        // this a long label takes the whole row and the control
+                        // that makes the title tappable is squeezed to nothing.
+                        modifier = Modifier.weight(1f, fill = false),
+                        color = c.ink,
+                        fontSize = Type.large,
+                        fontWeight = FontWeight.SemiBold,
+                        // Months are never shortened, so a pair of names that
+                        // will not fit takes a second line instead. Two is the
+                        // ceiling by construction: a week spans at most two
+                        // months, so there are at most two names to print.
+                        maxLines = 2,
+                    )
+                    if (jumpable) {
+                        Spacer(Modifier.width(Space.tight))
+                        // What makes a title read as a control rather than a
+                        // label. It carries the description because the words
+                        // beside it name the month, not the action.
+                        Glyph(
+                            Ico.Expand,
+                            tint = c.inkMuted,
+                            size = IconSizeQuiet,
+                            description = "Choose a month and year",
+                        )
+                    }
+                }
                 Text(subhead(model), color = c.inkMuted, fontSize = Type.small, maxLines = 1)
             }
 
-            if (inlineSwitcher) {
-                ViewSwitcher(model, Modifier.width(280.dp))
-                Spacer(Modifier.width(Space.small))
-            }
             // Offered only when pressing it would move something. Asking
             // whether the anchor is today was the wrong question: stepping a
             // day forward and switching to week left the anchor on tomorrow,
             // same week, so the control appeared and did nothing.
             if (!model.showingToday) {
-                GlyphButton(Ico.Today, "Go to today", { model.goToday() })
                 Spacer(Modifier.width(Space.tight))
+                GlyphButton(Ico.Today, "Go to today", { model.goToday() })
             }
-            GlyphButton(Ico.Settings, "Settings", { model.screen = Screen.Settings })
         }
 
         // "Nothing moved, 736 entries" is worth saying once and then not
@@ -357,17 +461,6 @@ private fun TopBar(model: SkemaModel, inlineSwitcher: Boolean) {
             )
         }
     }
-}
-
-@Composable
-private fun ViewSwitcher(model: SkemaModel, modifier: Modifier = Modifier) {
-    Segmented(
-        options = ViewMode.entries,
-        selected = model.view,
-        label = { it.name },
-        onSelect = { model.setView(it) },
-        modifier = modifier,
-    )
 }
 
 /**
@@ -609,7 +702,7 @@ private fun DetailSheet(model: SkemaModel, palette: CoursePalette) {
  * screen; the partial stop scales it down to about half, which is as close to
  * invisible as a scrim can get and still separate two surfaces.
  */
-private const val SCRIM_MAX = 0.18f
+internal const val SCRIM_MAX = 0.18f
 
 /**
  * Whether the platform has been asked to stop animating.
@@ -621,7 +714,7 @@ private const val SCRIM_MAX = 0.18f
  * still welcome. One read, once, at composition.
  */
 @Composable
-private fun reducedMotion(): Boolean {
+internal fun reducedMotion(): Boolean {
     var reduced by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         reduced = currentCoroutineContext()[MotionDurationScale]?.scaleFactor == 0f
@@ -641,17 +734,26 @@ fun isoWeek(d: LocalDate): Int {
  * days. So the label is built from the days actually on screen and names both
  * months when there are two. The year moves to the subhead: it changes once a
  * year and it was the first thing to be truncated in the narrow pane.
+ *
+ * Both names are printed in full, always. There used to be a fallback that
+ * measured the space and dropped one of the two months when the pair would
+ * not fit on a line; it is gone. The longest pair a week can produce is
+ * "September to October" at twenty characters, about 242dp at Type.large,
+ * and the narrowest header in the app is the folded phone's, which after the
+ * menu and today controls still has close to 300dp. So the pair fits, and on
+ * the reading where it does not, the headline takes a second line rather than
+ * telling you the wrong month.
  */
 private fun weekLabel(model: SkemaModel): String {
     val from = weekStart(model.anchor)
-    val to = from.shift(Grid.dayCount(model.settings.showWeekend) - 1)
-    val first = monthShort(from.month)
-    val last = monthShort(to.month)
-    return if (first == last) first else "$first to $last"
+    val days = Grid.dayCount(model.settings.showWeekend)
+    val to = from.shift(days - 1)
+    if (from.month == to.month) return monthLong(from.month)
+    return monthLong(from.month) + " to " + monthLong(to.month)
 }
 
 private fun headline(model: SkemaModel): String = when (model.view) {
-    ViewMode.Month -> monthShort(model.anchor.month)
+    ViewMode.Month -> monthLong(model.anchor.month)
     ViewMode.Week -> weekLabel(model)
     ViewMode.Day -> relativeDay(model.selected) ?: dateLabel(model.selected)
     ViewMode.Agenda -> "Agenda"

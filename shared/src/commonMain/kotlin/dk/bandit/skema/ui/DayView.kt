@@ -326,13 +326,24 @@ private fun DayPage(
 /**
  * Where the day parks when it first appears.
  *
- * Today opens on the clock, because a day you are standing in is a question
- * about now. Any other day opens on its first event. Both back off by the hour
- * [DayWindow.openingMinute] already backs off by, so the two land the same way.
+ * Today is a question about what is left of it, not about the clock. Opening
+ * on the clock alone is right at 09:00 and useless at 02:38, when it parks on
+ * an empty night with the day's real content four screens below; the same is
+ * true of any hour with nothing near it. So today aims at the next thing that
+ * has not finished yet, and only falls back to the clock once the day is over.
+ * Any other day opens on its first event. This is the rule the week view
+ * already uses, and the two agreeing matters more than either being clever.
  */
-private fun openingMinute(date: LocalDate, events: List<CalendarEvent>): Int =
-    if (date == today()) (nowMinutes() - 60).coerceIn(0, 23 * 60)
-    else DayWindow.openingMinute(events)
+private fun openingMinute(date: LocalDate, events: List<CalendarEvent>): Int {
+    if (date != today()) return DayWindow.openingMinute(events)
+    val now = nowMinutes()
+    val next = events.filterNot { it.allDay }.filter { it.endMinute() > now }.minOfOrNull { it.startMinute() }
+    // The next unfinished event, not the earlier of it and the clock: taking
+    // the earlier is what parks 02:38 on an empty night when the day's first
+    // class is at 13:00. An event already running reports a start behind the
+    // clock, so that case lands on the event, which is also right.
+    return ((next ?: now) - 60).coerceIn(0, 23 * 60)
+}
 
 /**
  * The column itself: the rules, the blocks, the now line.

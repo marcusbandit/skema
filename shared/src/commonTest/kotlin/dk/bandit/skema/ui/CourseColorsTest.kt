@@ -10,13 +10,45 @@ import kotlin.test.assertTrue
  * The colours are computed, so they can be checked. Reading contrast off a
  * screen is the part that gets shipped wrong, so the AA floor is asserted for
  * every course in both themes rather than eyeballed.
+ *
+ * The hues are drawn at random now, which makes these floors matter more, not
+ * less: an even spread could only reach 360/n hues and a draw can reach any of
+ * them. So two of the tests below stop sampling and sweep instead. The
+ * per-hue floors are checked against the whole circle, and the floors that
+ * need a whole palette are checked against [seeds] different course sets at
+ * every size, so a bad seed cannot ship.
  */
 class CourseColorsTest {
 
     /** Plausible DTU codes: five digits, leading zero kept. */
     private fun codes(n: Int) = (0 until n).map { "02" + (300 + it * 7).toString().padStart(3, '0') }
 
+    /**
+     * n codes that no other seed produces. The generator is seeded from the
+     * codes themselves, so a fresh set of codes is a fresh seed, and this is
+     * the only handle a test has on the randomness.
+     */
+    private fun codes(n: Int, seed: Int) =
+        (0 until n).map { "0" + (2 + seed).toString() + (300 + it * 7).toString().padStart(3, '0') }
+
     private val sizes = listOf(1, 2, 5, 12, 30)
+
+    /** One code, for the tests that are about a hue rather than about a term. */
+    private val one = "02300"
+
+    /**
+     * How many different course sets, and so how many different seeds, the
+     * palette-wide floors are swept over at each size.
+     */
+    private val seeds = 80
+
+    /**
+     * Slack on a comparison against a margin. The hues are accumulated along
+     * an arc, so the last gap in a long arc carries a few Float rounding
+     * errors; measured worst 0.0009 degrees at n=60, and 0.01 is well inside
+     * anything the eye or the OKLab floor cares about.
+     */
+    private val tolerance = 0.01f
 
     // -----------------------------------------------------------------------
     // Hue assignment
@@ -32,26 +64,60 @@ class CourseColorsTest {
     }
 
     @Test
-    fun theHuesAreEvenlySpreadOverEverythingOutsideTheGuard() {
-        // Neighbours sit one step apart, the step being the free arc over the
-        // count. The single exception is the pair either side of the guard,
-        // which is a step plus the guard's whole width.
-        val free = 360f - 2f * CoursePalette.ACCENT_GUARD
-        for (n in 1..30) {
+    fun everyPairKeepsTheMarginTheTermGuarantees() {
+        // What replaced the even spread. The hues are drawn, so where they
+        // land is not predictable, but how close they may come is: no two
+        // courses in one term are nearer than marginFor(n).
+        for (n in 2..30) {
             val hues = CoursePalette(codes(n), dark = false).hues.values.sorted()
-            val step = free / n
-            val across = step + 2f * CoursePalette.ACCENT_GUARD
-            var crossings = 0
+            val margin = CoursePalette.marginFor(n)
             for (i in hues.indices) {
                 val next = if (i + 1 < hues.size) hues[i + 1] else hues[0] + 360f
-                val gap = next - hues[i]
-                if (abs(gap - across) < 0.01f) {
-                    crossings++
-                } else {
-                    assertTrue(abs(gap - step) < 0.01f, "n=$n gap $gap is neither $step nor $across")
-                }
+                assertTrue(next - hues[i] >= margin - tolerance, "n=$n gap ${next - hues[i]} under $margin")
             }
-            assertEquals(1, crossings, "n=$n should step over the guard exactly once")
+        }
+        println(
+            "margin: the guarantee is " + round2(CoursePalette.marginFor(5)) + " degrees at n=5, " +
+                round2(CoursePalette.marginFor(12)) + " at n=12, " +
+                round2(CoursePalette.marginFor(30)) + " at n=30",
+        )
+    }
+
+    @Test
+    fun theMarginIsAShareOfWhatTheCountAllows() {
+        // A term of five keeps the ideal 40, because more separation than that
+        // buys nothing. Twelve gets 0.7 of its 27.67 step. Thirty is where the
+        // 11 degree floor gives way to the step itself, so the draw has 2
+        // degrees of slack and the palette is the even spread again.
+        assertEquals(40f, round2f(CoursePalette.marginFor(5)))
+        assertEquals(19.37f, round2f(CoursePalette.marginFor(12)))
+        assertEquals(11f, round2f(CoursePalette.marginFor(30)))
+
+        // And it never asks for more than n allows, at any n, which is the
+        // property that keeps the placement from having to search or fail.
+        for (n in 1..200) {
+            val margin = CoursePalette.marginFor(n)
+            assertTrue(margin > 0f, "n=$n asked for $margin")
+            assertTrue(
+                margin <= CoursePalette.FREE_ARC / n + tolerance,
+                "n=$n asked for $margin, more than the ${CoursePalette.FREE_ARC / n} it can have",
+            )
+        }
+    }
+
+    @Test
+    fun aTermFullEnoughToLeaveNoSlackFallsBackToTheEvenSpread() {
+        // The circle really does run out. 60 courses in one term cannot be 11
+        // degrees apart, so the margin drops to the step and the draw has
+        // nothing left to draw: predictable degradation rather than a loop
+        // that never ends or a throw on a screen full of events.
+        val n = 60
+        val step = CoursePalette.FREE_ARC / n
+        assertEquals(round2f(step), round2f(CoursePalette.marginFor(n)))
+        val hues = CoursePalette(codes(n), dark = false).hues.values.sorted()
+        assertEquals(n, hues.size)
+        for (i in 0 until hues.size - 1) {
+            assertTrue(hues[i + 1] - hues[i] >= step - tolerance, "n=$n gap ${hues[i + 1] - hues[i]}")
         }
     }
 
@@ -63,17 +129,22 @@ class CourseColorsTest {
         var closest = 180f
         var closestAt = ""
         for (n in 1..30) {
-            val p = CoursePalette(codes(n), dark = false)
-            for ((code, hue) in p.hues) {
-                val d = hueDistance(hue, CoursePalette.ACCENT_HUE)
-                if (d < closest) {
-                    closest = d
-                    closestAt = "n=$n $code hue $hue"
+            for (seed in 0 until seeds) {
+                val p = CoursePalette(codes(n, seed), dark = false)
+                for ((code, hue) in p.hues) {
+                    val d = hueDistance(hue, CoursePalette.ACCENT_HUE)
+                    if (d < closest) {
+                        closest = d
+                        closestAt = "n=$n seed $seed $code hue $hue"
+                    }
+                    assertTrue(d >= CoursePalette.ACCENT_GUARD, "n=$n $code at $hue is only $d from the accent")
                 }
-                assertTrue(d >= CoursePalette.ACCENT_GUARD, "n=$n $code at $hue is only $d from the accent")
             }
         }
-        println("guard: closest automatic hue to the accent over n=1..30 is $closest degrees at $closestAt")
+        println(
+            "guard: over n=1..30 and $seeds course sets each, the closest drawn hue to the " +
+                "accent is ${round2(closest)} degrees at $closestAt",
+        )
     }
 
     @Test
@@ -83,15 +154,77 @@ class CourseColorsTest {
         assertTrue(abs(Color(0xFF7A0000).toOklch().h - CoursePalette.ACCENT_HUE) < 0.1f)
     }
 
+    // -----------------------------------------------------------------------
+    // Semesters
+    // -----------------------------------------------------------------------
+
+    private val autumn = listOf("02101", "02102", "02103", "02157", "02158")
+    private val spring = listOf("02157", "02201", "02202", "02203", "02204")
+
     @Test
-    fun theFirstCourseTakesTheSlotNearestStartHue() {
-        for (n in listOf(2, 5, 6, 12, 30)) {
-            val p = CoursePalette(codes(n), dark = false)
-            val nearest = p.hues.values.minByOrNull { hueDistance(it, CoursePalette.START_HUE) }
-            assertEquals(nearest, p.hue(codes(n).first()), "n=$n")
+    fun eachSemesterIsColouredWithinItselfAndKeepsItsOwnMargin() {
+        val p = CoursePalette.bySemester(listOf(autumn, spring), dark = false)
+        // Nine courses, because 02157 is taught in both.
+        assertEquals(9, p.hues.size)
+
+        val margin = CoursePalette.marginFor(5)
+        for (term in listOf(autumn, spring)) {
+            for (i in term.indices) {
+                for (j in i + 1 until term.size) {
+                    val d = hueDistance(p.hue(term[i])!!, p.hue(term[j])!!)
+                    assertTrue(d >= margin - tolerance, "${term[i]} and ${term[j]} are $d apart")
+                }
+            }
         }
-        // The owner's current term, six courses, lands course one on a green.
-        assertEquals(126.2f, round2f(CoursePalette(codes(6), dark = false).hue("02300")!!))
+
+        // The point of splitting them: nine courses coloured as one set would
+        // guarantee 25.82 degrees, and as two terms of five they guarantee 40.
+        assertTrue(CoursePalette.marginFor(5) > CoursePalette.marginFor(9))
+        println(
+            "semesters: five courses guarantee " + round2(CoursePalette.marginFor(5)) +
+                " degrees, the nine they add up to would guarantee " +
+                round2(CoursePalette.marginFor(9)),
+        )
+    }
+
+    @Test
+    fun aCourseTaughtInTwoTermsKeepsTheOneColour() {
+        val p = CoursePalette.bySemester(listOf(autumn, spring), dark = true)
+        val shared = p.hue("02157")!!
+        // The spring is drawn around it rather than over it.
+        val margin = CoursePalette.marginFor(5)
+        for (code in spring - "02157") {
+            assertTrue(hueDistance(p.hue(code)!!, shared) >= margin - tolerance, code)
+        }
+    }
+
+    @Test
+    fun aNewSemesterLeavesTheOldOnesWhereTheyWere() {
+        // Semesters are placed in the order given and callers pass the oldest
+        // first, so next February cannot repaint last autumn.
+        val before = CoursePalette.bySemester(listOf(autumn), dark = false)
+        val after = CoursePalette.bySemester(listOf(autumn, spring), dark = false)
+        for (code in autumn) assertEquals(before.hue(code), after.hue(code), code)
+    }
+
+    @Test
+    fun twoTermsAreAllowedToShareAColour() {
+        // The owner's rule, stated as a test so nobody adds a global check
+        // later: nothing here separates terms from each other, and the run
+        // below finds a pair that proves it rather than asserting it cannot
+        // happen by luck.
+        val margin = CoursePalette.marginFor(5)
+        var closest = 180f
+        for (seed in 0 until seeds) {
+            val one = codes(5, seed)
+            val two = codes(5, seed + seeds)
+            val p = CoursePalette.bySemester(listOf(one, two), dark = false)
+            for (a in one) {
+                for (b in two) closest = minOf(closest, hueDistance(p.hue(a)!!, p.hue(b)!!))
+            }
+        }
+        assertTrue(closest < margin, "no cross-term pair ever came closer than $margin, so terms are not independent")
+        println("semesters: closest pair across two terms over $seeds draws is ${round2(closest)} degrees")
     }
 
     // -----------------------------------------------------------------------
@@ -237,6 +370,110 @@ class CourseColorsTest {
     }
 
     @Test
+    fun everyHueTheDrawCanReachClearsInkAndPageContrast() {
+        // The even spread could only land on 360/n hues, so sweeping the hues
+        // it assigned covered the whole palette. A draw lands anywhere outside
+        // the guard, so the sweep has to be the circle itself, at a quarter of
+        // a degree. That is stronger than trying seeds: it leaves no hue for a
+        // future seed to find.
+        for (dark in listOf(false, true)) {
+            val background = skemaColors(dark).background
+            var worstInk = Float.MAX_VALUE
+            var worstInkAt = 0f
+            var worstFill = Float.MAX_VALUE
+            var worstFillAt = 0f
+            var swept = 0
+            var hue = 0f
+            while (hue < 360f) {
+                if (hueDistance(hue, CoursePalette.ACCENT_HUE) >= CoursePalette.ACCENT_GUARD) {
+                    swept++
+                    val t = CoursePalette(listOf(one), mapOf(one to hue), dark).tint(one)
+                    val ink = contrastRatio(t.ink, t.fill)
+                    val fill = contrastRatio(t.fill, background)
+                    if (ink < worstInk) {
+                        worstInk = ink
+                        worstInkAt = hue
+                    }
+                    if (fill < worstFill) {
+                        worstFill = fill
+                        worstFillAt = hue
+                    }
+                    assertTrue(ink >= 4.5f, "dark=$dark hue $hue ink on fill is $ink")
+                    assertTrue(fill >= fillOnBackgroundFloor, "dark=$dark hue $hue fill on page is $fill")
+                }
+                hue += 0.25f
+            }
+            println(
+                "sweep: ${if (dark) "dark " else "light"} over $swept hues, worst ink-on-fill " +
+                    "${round2(worstInk)}:1 at hue $worstInkAt, worst fill-on-page " +
+                    "${round2(worstFill)}:1 at hue $worstFillAt",
+            )
+        }
+    }
+
+    @Test
+    fun everyCourseSetSweptHoldsEveryFloor() {
+        // The floors that need a whole palette rather than one hue: how close
+        // two courses come, in degrees and in OKLab. Swept over a fresh
+        // roster per seed at every size and in both themes, because the draw
+        // is what is being trusted here and one roster says nothing about the
+        // next.
+        for (dark in listOf(false, true)) {
+            val background = skemaColors(dark).background
+            for (n in sizes) {
+                val margin = CoursePalette.marginFor(n)
+                var worstGap = 360f
+                var worstPair = Float.MAX_VALUE
+                var worstPairAt = ""
+                var worstInk = Float.MAX_VALUE
+                var worstFill = Float.MAX_VALUE
+                for (seed in 0 until seeds) {
+                    val all = codes(n, seed)
+                    val p = CoursePalette(all, dark = dark)
+                    assertEquals(n, p.hues.values.distinct().size, "n=$n seed $seed collided")
+                    for (i in all.indices) {
+                        val t = p.tint(all[i])
+                        val ink = contrastRatio(t.ink, t.fill)
+                        val fill = contrastRatio(t.fill, background)
+                        if (ink < worstInk) worstInk = ink
+                        if (fill < worstFill) worstFill = fill
+                        assertTrue(ink >= 4.5f, "dark=$dark n=$n seed $seed ${all[i]} ink on fill is $ink")
+                        assertTrue(
+                            fill >= fillOnBackgroundFloor,
+                            "dark=$dark n=$n seed $seed ${all[i]} fill on page is $fill",
+                        )
+                        for (j in i + 1 until all.size) {
+                            val gap = hueDistance(p.hue(all[i])!!, p.hue(all[j])!!)
+                            val d = oklabDistance(t.fill, p.tint(all[j]).fill)
+                            if (gap < worstGap) worstGap = gap
+                            if (d < worstPair) {
+                                worstPair = d
+                                worstPairAt = "seed $seed hues ${p.hue(all[i])}/${p.hue(all[j])}"
+                            }
+                            assertTrue(
+                                gap >= margin - tolerance,
+                                "dark=$dark n=$n seed $seed ${all[i]} and ${all[j]} are $gap apart, under $margin",
+                            )
+                            assertTrue(
+                                d >= fillSeparationFloor,
+                                "dark=$dark n=$n seed $seed ${all[i]} and ${all[j]} are $d apart in OKLab",
+                            )
+                        }
+                    }
+                }
+                if (n > 1) {
+                    println(
+                        "seeds: ${if (dark) "dark " else "light"} n=$n over $seeds sets, " +
+                            "closest pair ${round2(worstGap)} degrees against a ${round2(margin)} margin, " +
+                            "$worstPair in OKLab at $worstPairAt, worst ink-on-fill ${round2(worstInk)}:1, " +
+                            "worst fill-on-page ${round2(worstFill)}:1",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
     fun aCourseKeepsItsColourWhenTheThemeFlips() {
         // Only L and C differ between the ramps. If a hue ever moved, a course
         // would change identity on a theme switch, which is worse than either
@@ -284,10 +521,14 @@ class CourseColorsTest {
             assertTrue(hueDistance(h, 29.2f) > 1f, "$code landed on the pinned hue at $h")
         }
         // The pin is inside the guard, so it cuts an arc nothing was using and
-        // the four that are left share the 332 degrees outside it: the free arc
-        // runs 43.2 to 375.2 and they sit at (i + 0.5) / 4 along it.
+        // the four that are left are drawn into the 332 degrees outside it,
+        // each keeping the term's margin from the next. Where exactly they
+        // land is the draw's business, so the test asks about the gaps.
+        val margin = CoursePalette.marginFor(5)
         val free = (all - pinnedCode).map { p.hue(it)!! }.sorted()
-        assertEquals(listOf(84.7f, 167.7f, 250.7f, 333.7f), free.map { round2f(it) })
+        for (i in 0 until free.size - 1) {
+            assertTrue(free[i + 1] - free[i] >= margin - tolerance, "gap ${free[i + 1] - free[i]} under $margin")
+        }
     }
 
     @Test
@@ -297,14 +538,21 @@ class CourseColorsTest {
 
         assertEquals(0f, p.hue(all[0]))
         assertEquals(180f, p.hue(all[1]))
+        assertEquals(6, p.hues.values.distinct().size)
         // The guard splits the upper half, so the usable arcs are 0 to 15.2,
         // 43.2 to 180 and 180 to 360. Largest remainder gives them 0, 2 and 2
-        // courses; the arc that starts on a guard edge takes a half margin
-        // there and a whole one at the pin, the arc between two pins takes a
-        // whole margin at each end and comes out on the thirds.
-        val free = all.drop(2).map { p.hue(it)!! }.sorted().map { round2f(it) }
-        assertEquals(listOf(70.56f, 125.28f, 240f, 300f), free)
-        assertEquals(6, p.hues.values.distinct().size)
+        // courses; the arc that starts on a guard edge asks half a margin
+        // there and a whole one at the pin. With the pins 180 apart every
+        // consecutive pair, drawn or pinned, still clears the margin.
+        val margin = CoursePalette.marginFor(6)
+        val hues = p.hues.values.sorted()
+        for (i in hues.indices) {
+            val next = if (i + 1 < hues.size) hues[i + 1] else hues[0] + 360f
+            assertTrue(next - hues[i] >= margin - tolerance, "gap ${next - hues[i]} under $margin")
+        }
+        for (h in all.drop(2).map { p.hue(it)!! }) {
+            assertTrue(hueDistance(h, CoursePalette.ACCENT_HUE) >= CoursePalette.ACCENT_GUARD, "$h is in the guard")
+        }
     }
 
     @Test
@@ -351,26 +599,55 @@ class CourseColorsTest {
     fun blanksAndDuplicatesDoNotConsumeAHue() {
         val p = CoursePalette(listOf("02300", "02300", "", "  ", "02307"), dark = false)
         assertEquals(2, p.hues.size)
-        // Two courses over the 332 degrees outside the guard, so 166 apart.
-        assertEquals(166f, round2f(hueDistance(p.hue("02300")!!, p.hue("02307")!!)))
+        // A term of two, so the ideal 40 degree margin applies and the pair
+        // is somewhere in the 292 degrees of slack left over.
+        assertTrue(
+            hueDistance(p.hue("02300")!!, p.hue("02307")!!) >= CoursePalette.marginFor(2) - tolerance,
+        )
     }
 
     @Test
     fun theAssignmentIsDeterministicAcrossConstructions() {
-        val all = codes(12)
-        val a = CoursePalette(all, dark = false)
-        val b = CoursePalette(all, dark = false)
-        val shuffled = CoursePalette(all.reversed(), dark = false)
-        for (code in all) {
-            assertEquals(a.tint(code), b.tint(code), code)
-            assertEquals(a.tint(code), shuffled.tint(code), "$code depends on input order")
+        // The one thing randomness must not cost: an app that looks different
+        // every time it opens. The generator is seeded from the codes, so the
+        // same roster reproduces the same palette, and the codes are sorted
+        // first, so the order the feed happened to list them in cannot matter.
+        for (n in sizes) {
+            val all = codes(n)
+            val a = CoursePalette(all, dark = false)
+            val b = CoursePalette(all, dark = false)
+            val reversed = CoursePalette(all.reversed(), dark = false)
+            for (code in all) {
+                assertEquals(a.tint(code), b.tint(code), "n=$n $code moved between two constructions")
+                assertEquals(a.tint(code), reversed.tint(code), "n=$n $code depends on input order")
+            }
         }
 
+        val all = codes(12)
         val o = mapOf(all[4] to 200f, all[9] to 12f)
         assertEquals(
             CoursePalette(all, o, dark = true).hues,
             CoursePalette(all.reversed(), o, dark = true).hues,
         )
+
+        // Semesters too, including the shared course that crosses them.
+        assertEquals(
+            CoursePalette.bySemester(listOf(autumn, spring), dark = false).hues,
+            CoursePalette.bySemester(listOf(autumn.reversed(), spring.reversed()), dark = false).hues,
+        )
+    }
+
+    @Test
+    fun addingACourseRedrawsThatTermAndOnlyThatTerm() {
+        // The other half of determinism: colours are allowed to move when the
+        // data moves, and the roster is the data. A course joining the spring
+        // re-rolls the spring, because five hues have to become six, and the
+        // autumn is untouched because its own seed did not change.
+        val grown = spring + "02205"
+        val before = CoursePalette.bySemester(listOf(autumn, spring), dark = false)
+        val after = CoursePalette.bySemester(listOf(autumn, grown), dark = false)
+        for (code in autumn) assertEquals(before.hue(code), after.hue(code), code)
+        assertEquals(6, grown.count { after.hue(it) != null })
     }
 
     @Test

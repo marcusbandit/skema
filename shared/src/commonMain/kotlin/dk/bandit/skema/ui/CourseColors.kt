@@ -13,14 +13,18 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * One colour per course, computed from how many courses there are.
+ * One colour per course, drawn at random and kept apart by a margin.
  *
  * There is no list of pretty hex values here on purpose. A fixed list of, say,
  * twelve colours is wrong the moment a term has thirteen courses, and it is
  * already wrong at three, because three colours picked out of a list of twelve
  * are nowhere near as far apart as three colours spread over the whole circle.
- * The hue is a function of the course's position in the sorted set of codes and
- * of the size of that set, so any n gets the widest separation n allows.
+ * The hue is drawn from the circle instead, and every draw has to sit a
+ * computed distance from the hues that semester already holds, so any n gets
+ * as much separation as n allows and no two courses arrive on the same blue.
+ *
+ * Random, but the same every launch: the generator is seeded from the
+ * semester's own course codes. See [assignHues].
  *
  * One arc of the circle is not available: the app's own red. See
  * [CoursePalette.ACCENT_GUARD].
@@ -152,26 +156,37 @@ fun oklabDistance(x: Color, y: Color): Float {
 }
 
 /**
- * The colours for one term, one theme.
+ * The colours for one feed, one theme.
  *
- * [codes] is every course code in the feed; blanks are dropped and the rest
- * sorted, so the same term always produces the same colours whatever order the
- * events arrived in. [overrides] pins a course to a hue in degrees, stored as
- * a plain number so settings can keep it as JSON. A pinned hue is taken out of
- * circulation: the courses that are left get re-spread over the arcs between
- * the pins, again by formula. An override only applies to a code that is
- * actually in [codes]; the palette describes this term, not every term.
+ * A palette colours whatever it is handed. The plain constructor treats its
+ * list as a single semester; [CoursePalette.bySemester] takes one list per
+ * semester and colours each in turn, which is the shape the app uses. Two
+ * courses in different semesters may end up on the same colour, because they
+ * never share a screen, and that permission is what buys the separation: a
+ * term holds about five courses where the whole feed holds fifteen, and five
+ * courses can be three times further apart.
+ *
+ * [overrides] pins a course to a hue in degrees, stored as a plain number so
+ * settings can keep it as JSON. A pinned hue is honoured exactly and is never
+ * moved, guard or no guard; the courses sharing its semester are placed around
+ * it. An override only applies to a code the palette was handed, since the
+ * palette describes this feed and not every feed.
  */
 @Immutable
-class CoursePalette(
-    codes: List<String>,
-    overrides: Map<String, Float> = emptyMap(),
+class CoursePalette private constructor(
+    /** Course code to hue in degrees. */
+    val hues: Map<String, Float>,
     val dark: Boolean,
 ) {
-    private val ramp = if (dark) DarkRamp else LightRamp
 
-    /** Course code to hue in degrees. */
-    val hues: Map<String, Float> = assignHues(codes, overrides)
+    /** One flat list of courses, coloured as though they were one semester. */
+    constructor(
+        codes: List<String>,
+        overrides: Map<String, Float> = emptyMap(),
+        dark: Boolean,
+    ) : this(assignHues(listOf(codes), overrides), dark)
+
+    private val ramp = if (dark) DarkRamp else LightRamp
 
     private val tints: Map<String, CourseTint> = hues.mapValues { (_, hue) -> ramp.tint(hue) }
 
@@ -196,36 +211,94 @@ class CoursePalette(
          * Half the arc kept clear of [ACCENT_HUE]. Automatic assignment never
          * enters it, so no course can be mistaken for the app's own accent.
          *
-         * The guard exists because spacing alone does not avoid the red. With
-         * the whole circle in play and a step of 360/n, a six course term used
-         * to land on hue 30, one degree off DTU red: its rail came out C83122
-         * against the accent's D10000, so a perfectly ordinary course looked
-         * like the conflict marker that EventBlock draws in accentStrong. n=4
-         * and n=12 hit the same wall.
+         * The guard exists because separation alone does not avoid the red.
+         * With the whole circle in play a six course term used to land on hue
+         * 30, one degree off DTU red: its rail came out C83122 against the
+         * accent's D10000, so a perfectly ordinary course looked like the
+         * conflict marker that EventBlock draws in accentStrong.
          *
          * 14 was picked off the numbers. Hue 30's rail sat 0.033 away from
          * D10000 in OKLab, under the distance two neighbouring courses sit
          * at, so it read as the accent rather than as a course. The guard
          * puts the nearest reachable hue at 19.5 degrees and its rail at
-         * 0.077, and a term of six keeps its nearest at 41.7 degrees and
-         * 0.155. Widening it further only helps counts where the courses
-         * are already crowded against each other, and every degree comes
-         * out of the palette: 14 spends 28 of the 360, 20 would spend 40.
+         * 0.077. Widening it further only helps counts where the courses are
+         * already crowded against each other, and every degree comes out of
+         * the palette: 14 spends 28 of the 360, 20 would spend 40.
          */
         const val ACCENT_GUARD = 14f
 
+        /** The circle less the guard at both ends: everything a draw can reach. */
+        const val FREE_ARC = 360f - 2f * ACCENT_GUARD
+
         /**
-         * The phase of the automatic spread. The slots come out of the arc
-         * geometry, so course one takes whichever slot sits nearest this hue
-         * and the rest follow it round the circle. 150 is a green, and picking
-         * a green means the course a term is usually named after keeps a
-         * recognisable colour as courses are added and removed.
+         * How much of the even step the margin claims, leaving the rest as
+         * slack for the random draw.
          *
-         * With one course there is a single slot and nothing to choose, so the
-         * anchor has no effect; that slot is the middle of the free arc, which
-         * is as far from the red as it is possible to be.
+         * Where the share is the binding term it leaves (1 - 0.7) * 332,
+         * near enough 100 degrees, to hand out at random however many courses
+         * there are, which is what makes a term look drawn rather than
+         * stepped. Below n = 7 the ideal binds instead and there is more; past
+         * n = 21 the floor binds and there is less.
          */
-        const val START_HUE = 150f
+        const val MARGIN_SHARE = 0.7f
+
+        /**
+         * The margin stops growing here. Two fills 40 degrees apart measure
+         * 0.046 in OKLab dark and 0.064 light, four times the 0.010 floor the
+         * palette is held to, so a term of five spending more of the circle
+         * on separation buys nothing and gives up all its variety.
+         */
+        const val MARGIN_IDEAL = 40f
+
+        /**
+         * The margin stops shrinking here, unless the circle is too full to
+         * grant it.
+         *
+         * Measured on the dark ramp, which is the binding one: the cyans hit
+         * the sRGB chroma ceiling at fill lightness 0.39, so a pair around
+         * hue 188 measures 0.0105 in OKLab at 11 degrees apart and 0.0088 at
+         * 10. The floor for two fills is 0.010, so 11 degrees is where two
+         * dark blocks stop being different colours.
+         */
+        const val MARGIN_FLOOR = 11f
+
+        /**
+         * The separation n courses in one semester are guaranteed, in degrees.
+         *
+         * n courses cannot all be more than [FREE_ARC] / n apart, so the ask
+         * is a share of that even step and not a fixed number of degrees,
+         * which would break at large n. [MARGIN_IDEAL] and [MARGIN_FLOOR] cap
+         * it at both ends, and the even step itself wins over the floor once
+         * the term is large enough that the floor will not fit, which is n =
+         * 31 and up. There the margin is the whole step, the slack is zero,
+         * and the palette degrades to the even spread, the most separated
+         * arrangement there is.
+         *
+         * The guarantee holds between automatically placed hues. A pin the
+         * owner dragged somewhere is honoured exactly, so two pins can sit as
+         * close as the owner put them; ColorEditor says so rather than moving
+         * them.
+         */
+        fun marginFor(n: Int): Float {
+            val step = FREE_ARC / max(1, n)
+            return min(step, max(MARGIN_FLOOR, min(MARGIN_IDEAL, step * MARGIN_SHARE)))
+        }
+
+        /**
+         * One palette over several semesters, each coloured within itself.
+         *
+         * Two subjects in different terms wearing the same colour does not
+         * matter, because they never appear together. A course taught in two
+         * terms still gets one colour, taken from whichever term is placed
+         * first, so it does not change identity halfway through a degree.
+         * Pass the semesters oldest first and a new term can never re-roll an
+         * old one.
+         */
+        fun bySemester(
+            semesters: List<List<String>>,
+            overrides: Map<String, Float> = emptyMap(),
+            dark: Boolean,
+        ): CoursePalette = CoursePalette(assignHues(semesters, overrides), dark)
     }
 }
 
@@ -233,28 +306,75 @@ class CoursePalette(
 // Hue assignment
 // ---------------------------------------------------------------------------
 
-private fun assignHues(codes: List<String>, overrides: Map<String, Float>): Map<String, Float> {
-    val present = codes.filter { it.isNotBlank() }.distinct().sorted()
+/**
+ * Hues for every course, one semester at a time.
+ *
+ * The hues are drawn from the circle rather than stepped round it, and every
+ * draw keeps [CoursePalette.marginFor] degrees from each hue the same semester
+ * already holds. The draw is what stops a term reading as a colour wheel with
+ * the courses in alphabetical order; the margin is what stops two of them
+ * arriving on the same blue.
+ *
+ * Random, and the same on every launch. The generator is seeded from the
+ * semester's own sorted course codes, so the seed is a property of the data:
+ * no clock, no platform RNG, no first-run file to write. The same roster
+ * reproduces the same palette on every start and on every device, and a
+ * palette that changed on every launch would be the actual bug here. Change
+ * the roster and that term re-rolls, which is the one time colours should
+ * move.
+ *
+ * Semesters are taken in the order given and a course placed by an earlier one
+ * keeps its hue instead of getting a second. Callers pass the oldest first, so
+ * adding this autumn's courses cannot disturb last spring's.
+ */
+private fun assignHues(
+    semesters: List<List<String>>,
+    overrides: Map<String, Float>,
+): Map<String, Float> {
+    val groups = semesters
+        .map { term -> term.filter { it.isNotBlank() }.distinct().sorted() }
+        .filter { it.isNotEmpty() }
+    val present = groups.flatten().distinct().sorted()
     if (present.isEmpty()) return emptyMap()
 
     // An override is an explicit decision, so it is honoured exactly, even
     // inside the accent guard. The guard only governs automatic assignment.
-    val pinned = present.mapNotNull { code -> overrides[code]?.let { code to wrapHue(it) } }.toMap()
-    val free = present.filterNot { it in pinned }
-    if (free.isEmpty()) return pinned
+    val placed = HashMap<String, Float>()
+    for (code in present) overrides[code]?.let { placed[code] = wrapHue(it) }
 
-    // Marks cut the circle into arcs. Every pinned hue is a mark, and so are
-    // the two edges of the accent guard, which is the whole trick: the guard
-    // is a pin that no course can occupy, so it needs no code of its own.
-    // Because both edges are always marks, every arc that falls out is either
-    // wholly inside the guard or wholly outside it, and the two courses either
-    // side of the guard are pushed apart rather than crowded together.
-    val pins = pinned.values.distinct().toSet()
+    for (group in groups) placeSemester(group, placed)
+
+    // Sorted, so the map reads the same whatever order the events arrived in.
+    return present.associateWith { placed.getValue(it) }
+}
+
+/**
+ * Places the courses of one semester that do not have a hue yet.
+ *
+ * Marks cut the circle into arcs. Every hue this semester already holds is a
+ * mark, and so are the two edges of the accent guard, which is the whole
+ * trick: the guard is a pin no course can occupy, so it needs no code of its
+ * own. Because both edges are always marks, every arc that falls out is either
+ * wholly inside the guard or wholly outside it, and the two courses either
+ * side of the guard are pushed apart rather than crowded together.
+ */
+private fun placeSemester(members: List<String>, placed: MutableMap<String, Float>) {
+    val pending = members.filterNot { it in placed }
+    if (pending.isEmpty()) return
+
+    // The margin comes from the size of the whole semester, not from how many
+    // of it are still unplaced: the courses already sitting there take up the
+    // same room whether they were pinned by hand or by an earlier term.
+    val target = CoursePalette.marginFor(members.size)
+    val random = HueRandom(seedOf(members))
+
+    val pins = members.mapNotNull { placed[it] }.distinct()
+    val pinned = pins.toSet()
     val marks = (
         pins +
             wrapHue(CoursePalette.ACCENT_HUE - CoursePalette.ACCENT_GUARD) +
             wrapHue(CoursePalette.ACCENT_HUE + CoursePalette.ACCENT_GUARD)
-        ).sorted()
+        ).distinct().sorted()
 
     val starts = FloatArray(marks.size) { marks[it] }
     val widths = FloatArray(marks.size) { j ->
@@ -267,63 +387,169 @@ private fun assignHues(codes: List<String>, overrides: Map<String, Float>): Map<
         hueDistance(starts[j] + widths[j] / 2f, CoursePalette.ACCENT_HUE) < CoursePalette.ACCENT_GUARD
     }
 
-    // Each usable arc takes a share of the courses proportional to its width.
-    // Largest remainder hands out the seats the division leaves over, ties
-    // going to the lower arc so the result does not depend on sort order.
+    // What each end of an arc asks for, in margins. A mark with a course
+    // sitting on it wants a whole one. A guard edge has nothing sitting on it
+    // and already carries 14 degrees of its own, so half is enough there.
+    val heads = FloatArray(marks.size) { j -> if (marks[j] in pinned) 1f else 0.5f }
+    val tails = FloatArray(marks.size) { j -> if (marks[(j + 1) % marks.size] in pinned) 1f else 0.5f }
+
+    // Courses go one at a time to whichever arc would keep the most room
+    // spare after taking one. That spreads them by width, and it is what
+    // stops a pin's leftovers from being crowded: sharing them out in
+    // proportion to width instead dropped a course into the 16.8 degree
+    // sliver that a pin at hue 60 leaves against the guard, where the margin
+    // collapsed to 11.2 degrees while 315 degrees sat empty next door.
+    // Balancing the spare room is the allocation that maximises the tightest
+    // arc, so when any split of the courses fits the margin, this one does.
     val usable = marks.indices.filterNot { blocked[it] }
-    val usableWidth = usable.map { widths[it] }.sum()
-    val m = free.size
-    val exact = FloatArray(marks.size)
     val counts = IntArray(marks.size)
-    for (j in usable) {
-        exact[j] = m * widths[j] / usableWidth
-        counts[j] = exact[j].toInt()
-    }
-    val order = usable.sortedWith(compareByDescending<Int> { exact[it] - counts[it] }.thenBy { it })
-    var leftover = m - counts.sum()
-    var pick = 0
-    while (leftover > 0) {
-        counts[order[pick % order.size]]++
-        leftover--
-        pick++
-    }
-
-    // Placement inside an arc of width w holding c courses:
-    //
-    //     hue(i) = start + w * (i + m0) / (c - 1 + m0 + m1)
-    //
-    // where m0 and m1 are the margins the two ends ask for. A pinned course
-    // sits on its end and wants a whole step of clearance, so its margin is 1
-    // and the familiar (i + 1) / (c + 1) comes back out. A guard edge has
-    // nothing sitting on it and already carries 14 degrees of its own, so half
-    // a step is enough; a six course term with no overrides then spreads at
-    // 332/6 rather than 332/7, which is the separation that was there before
-    // the guard took its share.
-    val slots = buildList {
-        for (j in marks.indices) {
-            val c = counts[j]
-            if (c == 0) continue
-            val m0 = if (marks[j] in pins) 1f else 0.5f
-            val m1 = if (marks[(j + 1) % marks.size] in pins) 1f else 0.5f
-            val denominator = c - 1 + m0 + m1
-            for (i in 0 until c) add(wrapHue(starts[j] + widths[j] * (i + m0) / denominator))
+    if (usable.isEmpty()) {
+        // Out of reach with a 28 degree guard on a 360 degree circle, since
+        // the arc opposite the red can never be blocked. Kept so that a
+        // future guard cannot silently produce a term with no hues at all.
+        counts[widths.indices.maxByOrNull { widths[it] } ?: 0] = pending.size
+    } else {
+        repeat(pending.size) {
+            var best = usable[0]
+            var bestRoom = -Float.MAX_VALUE
+            for (j in usable) {
+                val room = widths[j] - target * (counts[j] + heads[j] + tails[j])
+                if (room > bestRoom) {
+                    bestRoom = room
+                    best = j
+                }
+            }
+            counts[best]++
         }
     }
 
-    // The geometry fixes where the slots are; START_HUE fixes which one comes
-    // first. The first course by code takes the slot nearest it and the rest
-    // follow round the circle, so the set of hues is untouched and only the
-    // pairing rotates. Ties go to the lower slot, which keeps this total.
-    var anchor = 0
-    for (i in slots.indices) {
-        if (hueDistance(slots[i], CoursePalette.START_HUE) < hueDistance(slots[anchor], CoursePalette.START_HUE)) {
-            anchor = i
+    // Which course takes which hue is drawn as well, so the alphabet decides
+    // the colours no more than the circle does.
+    val takers = shuffled(pending, random)
+    var next = 0
+    for (j in marks.indices) {
+        val count = counts[j]
+        if (count == 0) continue
+        for (hue in arcHues(starts[j], widths[j], count, heads[j], tails[j], target, random)) {
+            placed[takers[next]] = hue
+            next++
         }
     }
-    val rotated = List(slots.size) { slots[(anchor + it) % slots.size] }
-
-    return pinned + free.zip(rotated).toMap()
 }
+
+/**
+ * Where [count] courses land inside one arc.
+ *
+ * The arc is a run of gaps: from its start to the first course, then between
+ * neighbours, then from the last course to its end. Every inner gap has to be
+ * at least the margin and the two ends ask for [headShare] and [tailShare] of
+ * one; what is left after those minimums is slack, and the slack is where the
+ * randomness lives. Splitting it by sorting [count] uniform draws and taking
+ * the differences lands a uniform point on the simplex, so the courses are
+ * uniform over every arrangement the margin allows rather than wobbling around
+ * fixed slots. Drawing positions independently instead would need rejection
+ * and could fail; this cannot.
+ *
+ * The margin degrades in one step rather than by a search. An arc of width w
+ * holding c courses cannot do better than w / (c - 1 + ends), so the ask is
+ * capped there. When the circle is full that cap wins, the slack falls to
+ * zero, and the arrangement collapses to the even spread. Nothing loops and
+ * nothing throws.
+ */
+private fun arcHues(
+    start: Float,
+    width: Float,
+    count: Int,
+    headShare: Float,
+    tailShare: Float,
+    target: Float,
+    random: HueRandom,
+): List<Float> {
+    val need = count - 1 + headShare + tailShare
+    val margin = min(target, width / need)
+    val slack = max(0f, width - margin * need)
+
+    val draws = FloatArray(count) { random.nextFloat() }
+    draws.sort()
+
+    val out = ArrayList<Float>(count)
+    var cursor = start + margin * headShare
+    var previous = 0f
+    for (i in 0 until count) {
+        if (i > 0) cursor += margin
+        cursor += (draws[i] - previous) * slack
+        previous = draws[i]
+        out.add(wrapHue(cursor))
+    }
+    return out
+}
+
+/** Fisher-Yates off the same stream, so the pairing replays like the hues do. */
+private fun shuffled(codes: List<String>, random: HueRandom): List<String> {
+    val out = codes.toMutableList()
+    for (i in out.indices.reversed()) {
+        val j = random.nextInt(i + 1)
+        val held = out[i]
+        out[i] = out[j]
+        out[j] = held
+    }
+    return out
+}
+
+/**
+ * A counter-based generator, seeded from data and never from a clock.
+ *
+ * SplitMix64's finaliser over seed + counter * golden ratio is enough mixing
+ * for the handful of draws a semester needs, and it carries no state beyond
+ * the counter, so the same seed replays the same sequence on every platform.
+ * kotlin.random.Random is deliberately not used: its default is seeded from
+ * the clock, and a palette that came out different on every launch is exactly
+ * what this file exists to avoid.
+ */
+private class HueRandom(private val seed: Long) {
+    private var counter = 0L
+
+    fun nextFloat(): Float {
+        counter++
+        var z = seed + counter * GOLDEN
+        z = (z xor (z ushr 30)) * MIX_A
+        z = (z xor (z ushr 27)) * MIX_B
+        z = z xor (z ushr 31)
+        // The top 53 bits, which is every value a Double holds in [0, 1).
+        return ((z ushr 11).toDouble() / MANTISSA).toFloat()
+    }
+
+    /** Uniform over 0 until [bound]. The coerce catches a draw that rounds to 1. */
+    fun nextInt(bound: Int): Int = (nextFloat() * bound).toInt().coerceIn(0, bound - 1)
+}
+
+private const val GOLDEN = -0x61c8864680b583ebL
+private const val MIX_A = -0x40a7b892e31b1a47L
+private const val MIX_B = -0x6b2fb644ecceee15L
+private const val MANTISSA = 9007199254740992.0
+
+/**
+ * FNV-1a over one semester's sorted codes, which is the seed.
+ *
+ * Hashing the codes rather than the whole feed keeps a re-roll local: adding a
+ * course to this autumn changes this autumn's seed and no other. String
+ * hashCode would have done the job on the JVM, but it is not specified to
+ * match across Kotlin targets, and a course that came out green on Android and
+ * blue on the desktop is the same bug as one that changes every launch.
+ */
+private fun seedOf(codes: List<String>): Long {
+    var h = FNV_BASIS
+    for (code in codes) {
+        for (ch in code) h = (h xor ch.code.toLong()) * FNV_PRIME
+        // A code boundary, so "021" + "01" cannot hash like "02" + "101".
+        h = (h xor CODE_BREAK) * FNV_PRIME
+    }
+    return h
+}
+
+private const val FNV_BASIS = -0x340d631b7bdddcdbL
+private const val FNV_PRIME = 0x100000001b3L
+private const val CODE_BREAK = 0x1fL
 
 /** Degrees between two hues the short way round, so never more than 180. */
 fun hueDistance(a: Float, b: Float): Float {

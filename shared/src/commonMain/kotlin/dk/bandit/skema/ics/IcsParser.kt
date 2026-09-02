@@ -38,6 +38,17 @@ data class CalendarEvent(
     val descriptionWasHtml: Boolean,
     /** True when DTU generated this from a room booking rather than a human. */
     val fromRoomBooking: Boolean,
+    /**
+     * The TimeEdit reservation this came from, when DTU said so.
+     *
+     * Measured over one real feed: 278 of 688 descriptions are the same
+     * sentence about the booking being maintained from TimeEdit, differing
+     * only in this number, and not one of them carries any other text. So the
+     * sentence is not a description, it is this number wearing a paragraph.
+     * The number is kept and the paragraph is dropped, which leaves
+     * `description` meaning what it says.
+     */
+    val reservation: String? = null,
     val sequence: Int,
     val lastModified: String?,
     val rrule: String?,
@@ -63,7 +74,13 @@ class IcsParser(private val zone: TimeZone) {
 
         val rawDescription = by["DESCRIPTION"]?.value?.let(IcsLexer::unescape)
         val hadHtml = rawDescription?.let { HTML_TAG.containsMatchIn(it) } ?: false
-        val description = rawDescription?.let(::stripHtml)?.ifBlank { null }
+        val flattened = rawDescription?.let(::stripHtml)?.ifBlank { null }
+
+        // Whether DTU generated this is decided on the raw text, before the
+        // boilerplate is removed, or removing it would erase the evidence.
+        val generated = flattened?.contains(GENERATED_MARKER) == true
+        val reservation = flattened?.let { RESERVATION.find(it)?.groupValues?.get(1) }
+        val description = if (generated) stripBoilerplate(flattened) else flattened
 
         val base = CalendarEvent(
             uid = by["UID"]?.value.orEmpty(),
@@ -77,7 +94,8 @@ class IcsParser(private val zone: TimeZone) {
             location = location,
             description = description,
             descriptionWasHtml = hadHtml,
-            fromRoomBooking = description?.contains(GENERATED_MARKER) == true,
+            fromRoomBooking = generated,
+            reservation = reservation,
             sequence = by["SEQUENCE"]?.value?.toIntOrNull() ?: 0,
             lastModified = by["LAST-MODIFIED"]?.value,
             rrule = by["RRULE"]?.value,
@@ -121,6 +139,23 @@ class IcsParser(private val zone: TimeZone) {
 
     private companion object {
         const val GENERATED_MARKER = "automatically created and maintained"
+
+        /** "... TimeEdit reservation 74249 may be overwritten." */
+        private val RESERVATION = Regex("""reservation\s+(\d+)""", RegexOption.IGNORE_CASE)
+
+        /**
+         * The whole generated sentence, so anything a human added around it
+         * survives. No entry in the measured feed has anything around it, but
+         * dropping a teacher's note to save a regex would be a poor trade.
+         */
+        private val BOILERPLATE = Regex(
+            """This event is automatically created and maintained based on room bookings in TimeEdit\.\s*""" +
+                """Changes to time and location that do not match TimeEdit reservation \d+ may be overwritten\.""",
+            RegexOption.IGNORE_CASE,
+        )
+
+        private fun stripBoilerplate(text: String): String? =
+            text.replace(BOILERPLATE, "").trim().ifBlank { null }
         val HTML_TAG = Regex("""<[a-zA-Z/][^>]*>""")
 
         /** "20260902" -> "2026-09-02" */

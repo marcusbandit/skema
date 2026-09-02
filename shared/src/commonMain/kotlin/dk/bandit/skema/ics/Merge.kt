@@ -95,6 +95,9 @@ object Merge {
             location = mergeLocations(ordered.map { it.location }),
             description = described?.description,
             descriptionWasHtml = described?.descriptionWasHtml ?: false,
+            // The booking number comes from whichever side was generated;
+            // a hand-made entry never has one, so first non-null is right.
+            reservation = ordered.firstNotNullOfOrNull { it.reservation },
             // The flag means "no person wrote this". After a merge with a
             // hand-made side, one did, and the title on the card is theirs.
             // ui.textFor reads the flag to decide whether the course name or

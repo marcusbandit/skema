@@ -47,7 +47,21 @@ Four views: month, week, day and agenda. Week is the one the timetable is
 actually read in, so it is the default. Pinching zooms the hour height, and
 pinching past either end of the range walks to the next view along, so month
 to week to day is one continuous gesture. Swiping sideways moves a week, a
-day or a month depending on what is showing.
+day or a month depending on what is showing. The grid is the whole 24 hours,
+always: a window derived from the events put the same 13:00 at a different
+height on different weeks.
+
+Syncing is not a button. It runs when the app opens and every five minutes
+after that, which is far finer than the scale a timetable changes on, so
+there is nothing to opt out of.
+
+Where you were is restored when you come back, if you were there in the last
+half hour. Leaving the app and returning is free, because the state lives in
+a `remember` at the root and the activity is not recreated. The disk copy
+exists for the case where Android killed the process in between, which is
+indistinguishable from a cold start once the memory is gone, so elapsed time
+decides. Open it the next morning and it opens on today, as a calendar
+should.
 
 Every course gets its own colour, derived rather than picked from a list:
 hues are spread evenly over the number of courses present, in OKLCH so the
@@ -55,6 +69,16 @@ steps are even to the eye, with an arc reserved around DTU red so no course
 can be mistaken for the clash marker. Any subject can be pinned to a hue by
 hand in Settings, and the rest re-spread around it. Lightness and chroma are
 not adjustable, because they are what hold the text contrast above 4.5:1.
+
+Overlapping events stack rather than share a column. Splitting a column
+between them is the textbook answer and it fails on a folded phone: 73dp
+split two ways is 36dp a lane, which holds no words, so two events become two
+anonymous stripes. Each event now keeps nearly the full width, inset by depth
+so the one underneath still shows its rail, with later starts drawn on top so
+the earlier event's header sits in the clear. Events starting in the same
+minute step down one header each. A pane wide enough to hold words keeps the
+honest side by side layout, and the test is on width, so zooming in returns a
+clashing day to it.
 
 Duplicate entries merge field by field rather than one winning: where the two
 agree the value stands, where they differ the teacher's entry wins, and where
@@ -123,6 +147,22 @@ DTU's org unit, so the UID never tells you the course.
 Recurrence, by contrast, is a non-problem: 2 of 712 entries carry an `RRULE`,
 both plain weekly, and there is no `EXDATE`, `RDATE`, `EXRULE` or
 `RECURRENCE-ID` anywhere. A full RFC 5545 recurrence engine is not needed.
+
+## Semesters and enrolment
+
+DTU writes the term into `LOCATION` as a suffix on the course name, and the
+display code was throwing it away as noise, because it repeats on every card.
+Across a whole feed it is the strongest signal there is: 694 of 712 entries
+carry one, and on this feed they are Fall 2025, Spring 2026, Summer 2026 and
+Fall 2026. `ics/Term.kt` reads it, falling back to the date for the 18 that
+carry no course at all. Terms sort academically, so Fall 2025 precedes Spring
+2026, and a January course belongs to the autumn that opened the year rather
+than the calendar year it sits in.
+
+The feed is a record of the university, not of your degree: this one reaches
+back to 2019 and 98 of its entries predate the owner enrolling. An enrolment
+date drops them, and the date the app suggests is the start of the earliest
+semester DTU itself named.
 
 ## Folding
 

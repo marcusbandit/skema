@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private val CPH = TimeZone.of("Europe/Copenhagen")
@@ -126,11 +127,33 @@ class EventTest {
     }
 
     @Test
-    fun htmlIsStrippedFromDescription() {
+    fun theGeneratedBoilerplateBecomesAReservationRatherThanADescription() {
+        // This entry's whole DESCRIPTION is DTU's sentence about the booking
+        // being maintained from TimeEdit. 278 of one feed's 688 descriptions
+        // are that same sentence, differing only in the number and carrying
+        // nothing else, so it is kept as the number and dropped as prose.
         val e = parse().first { it.uid.startsWith("6606-440425") }
-        val d = e.description
-        assertNotNull(d)
-        assertTrue(!d.contains("<"), "markup survived: $d")
+        assertNull(e.description, "the boilerplate is not a description")
+        assertEquals("74249", e.reservation)
+        assertTrue(e.fromRoomBooking, "removing the text must not erase the evidence")
+    }
+
+    @Test
+    fun markupIsStrippedBeforeTheBoilerplateIsRecognised() {
+        // The 02339 entry wraps the same sentence in a span. If the markup
+        // were not flattened first the sentence would not match and the
+        // paragraph would reach the screen.
+        val e = parse().first { it.uid.startsWith("6606-446789") }
+        assertTrue(e.descriptionWasHtml, "this one really is the HTML variant")
+        assertNull(e.description)
+        assertEquals("72864", e.reservation)
+    }
+
+    @Test
+    fun aHumanDescriptionIsLeftAlone() {
+        val e = parse().first { it.uid.startsWith("6606-436193") }
+        assertEquals("Teaching", e.description)
+        assertNull(e.reservation, "a teacher's entry has no booking behind it")
     }
 
     @Test

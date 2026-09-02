@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import dk.bandit.skema.ics.CalendarEvent
 
 /**
@@ -113,10 +114,47 @@ fun EventDetail(
             fontSize = Type.small,
         )
 
+        // Only a real description reaches here now. The paragraph DTU repeats
+        // on every generated entry is stripped in the parser and comes back as
+        // the reservation stamp below, so this block is empty when there is
+        // genuinely nothing to say rather than empty of meaning.
         event.description?.takeIf { it.isNotBlank() }?.let {
             Spacer(Modifier.height(Space.medium))
             Text(it, color = c.ink, fontSize = Type.small)
         }
+
+        event.reservation?.let { ReservationStamp(it) }
+    }
+}
+
+/**
+ * The booking's provenance, reduced to what it actually says.
+ *
+ * DTU spends a paragraph on this and repeats it on 278 of one feed's 688
+ * descriptions, identical every time except the number. As prose it is noise
+ * that buries any real description; as a stamp it is a fact you can check
+ * against TimeEdit. Set quiet and in caps so it reads as a filing mark rather
+ * than as something to do.
+ */
+@Composable
+private fun ReservationStamp(number: String) {
+    val c = skema
+    Spacer(Modifier.height(Space.medium))
+    Row(
+        Modifier
+            .background(c.surfaceSunken, SquircleShape(Radius.chip))
+            .padding(horizontal = Space.small, vertical = Space.tight),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Glyph(Ico.Room, tint = c.inkMuted, size = IconSizeQuiet)
+        Spacer(Modifier.size(Space.tight))
+        Text(
+            "TIMEEDIT RESERVATION " + number,
+            color = c.inkMuted,
+            fontSize = Type.small,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 0.08.em,
+        )
     }
 }
 

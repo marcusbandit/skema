@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,9 +32,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
@@ -47,8 +46,8 @@ import kotlin.math.roundToInt
  * would also have to be a fixed list, and a fixed list is the thing the
  * palette exists to avoid.
  *
- * Clearing an override hands the course back to the palette, which re-spreads
- * every unpinned course over the arcs left between the pinned ones.
+ * Clearing an override hands the course back to the palette, which draws it
+ * again in the arcs left between the pinned ones.
  */
 
 /** Tall enough to hit with a thumb, short enough not to dominate the row. */
@@ -57,17 +56,13 @@ private val StripHeight = 32.dp
 /** One sample per this many dp of measured width. */
 private const val SAMPLE_STEP_DP = 2f
 
-/**
- * Roughly where two OKLCH hues at one lightness stop being reliably told
- * apart side by side. Used only to warn, never to move a hue the user chose.
- */
-private const val HUE_JND = 24f
-
 @Composable
 fun CourseColorRow(
     code: String,
     label: String,
     palette: CoursePalette,
+    /** This course's semester, the only place where two colours can clash. */
+    peers: List<String>,
     pinned: Float?,
     onPick: (Float?) -> Unit,
 ) {
@@ -77,7 +72,7 @@ fun CourseColorRow(
     // marker follows it rather than the stored override. An unpinned course
     // still has a hue, and the strip should say where.
     val hue = palette.hue(code)
-    val clashes = remember(code, palette) { clashing(code, palette) }
+    val clashes = remember(code, peers, palette) { clashing(code, peers, palette) }
 
     Column(Modifier.fillMaxWidth().padding(Space.small)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -109,11 +104,28 @@ fun CourseColorRow(
 
         if (clashes.isNotEmpty()) {
             Spacer(Modifier.height(Space.tight))
-            Text(
-                "Hard to tell apart from " + clashes.joinToString(SEPARATOR),
-                color = c.accentStrong,
-                fontSize = Type.small,
-            )
+            // Muted ink and the palette glyph, not accentStrong and the
+            // warning triangle. The owner's word for this case was "this is
+            // fine": the app is telling you something it noticed, not
+            // refusing the colour you picked, and a red line beside a red
+            // triangle would read as the second.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.tight),
+            ) {
+                Glyph(
+                    Ico.Palette,
+                    tint = c.inkMuted,
+                    size = IconSizeQuiet,
+                    description = "Colours close together",
+                )
+                Text(
+                    "Close to " + clashes.joinToString(SEPARATOR) +
+                        " this semester. Fine to keep, the two will just read as one colour at a glance.",
+                    color = c.inkMuted,
+                    fontSize = Type.small,
+                )
+            }
         }
     }
 }
@@ -230,27 +242,25 @@ private fun bandColors(samples: Int, dark: Boolean): List<Color> {
 }
 
 /**
- * Course codes whose colour is close enough to this one to be mistaken for it.
+ * The courses sharing this semester whose colour is close enough to this one
+ * to be mistaken for it.
  *
- * The limit is half the spacing the palette would hand out for this many
- * courses, capped at the point where two hues stop being separable at a
- * glance. Without the cap a two course term would call 60 degrees a
- * collision; without the halving a crowded term would call everything one.
- * This only warns. A hue the owner pinned is never moved for them.
+ * The threshold is [CoursePalette.marginFor], the separation the automatic
+ * assignment guarantees a term this size. So nothing the palette drew is ever
+ * flagged, and the note appears exactly when a hue was dragged closer than the
+ * app would ever have put it. It only informs; a hue the owner pinned is never
+ * moved for them.
+ *
+ * Only this semester is compared. Two courses in different terms landing on
+ * one colour is not a clash, because they never appear on the same screen, and
+ * saying otherwise would flag most of a three year degree.
  */
-private fun clashing(code: String, palette: CoursePalette): List<String> {
+private fun clashing(code: String, peers: List<String>, palette: CoursePalette): List<String> {
     val mine = palette.hue(code) ?: return emptyList()
-    val n = palette.hues.size
-    if (n < 2) return emptyList()
-    val limit = min(HUE_JND, 360f / n / 2f)
-    return palette.hues
-        .filter { (other, h) -> other != code && hueGap(mine, h) < limit }
-        .keys
+    val others = peers.filter { it != code }
+    if (others.isEmpty()) return emptyList()
+    val limit = CoursePalette.marginFor(others.size + 1)
+    return others
+        .filter { other -> palette.hue(other)?.let { hueDistance(mine, it) < limit } == true }
         .sorted()
-}
-
-/** Degrees apart on the circle, the short way round. */
-private fun hueGap(a: Float, b: Float): Float {
-    val d = abs(a - b) % 360f
-    return min(d, 360f - d)
 }

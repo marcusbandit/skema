@@ -26,7 +26,7 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 
-enum class Screen { Calendar, Settings }
+enum class Screen { Calendar, Semesters, Settings }
 
 /** Monday, because that is where a Danish week starts and where the feed's weeks start. */
 fun weekStart(d: LocalDate): LocalDate = d.minus(d.dayOfWeek.ordinal, DateTimeUnit.DAY)
@@ -255,21 +255,34 @@ class SkemaModel(
      * Called once at startup, before the first frame, so the calendar opens
      * on the right week rather than opening on today and then jumping.
      */
-    fun restoreSession() {
-        val saved = repo.session() ?: return
+    private fun restoreSession() {
+        val saved = repo.session()
+        if (saved == null) {
+            restored = true
+            return
+        }
         if (!saved.isFreshAt(nowSeconds())) {
             // Stale: they closed it properly, or that was yesterday. A
             // calendar opening cold should open on today.
             repo.clearSession()
+            restored = true
             return
         }
         settings = settings.copy(view = saved.view)
         anchor = LocalDate.fromEpochDays(saved.anchorEpochDay)
         selected = LocalDate.fromEpochDays(saved.selectedEpochDay)
         hourHeight = Grid.clampHour(saved.hourHeight)
+        restored = true
     }
 
     private var sessionJob: Job? = null
+
+    /**
+     * Set once the saved position has been read. Until then nothing may write
+     * a session, because the values in memory are still the defaults and
+     * saving them would destroy the thing being restored.
+     */
+    private var restored = false
 
     /**
      * Records the position, debounced. Every swipe between weeks calls this,
@@ -277,6 +290,7 @@ class SkemaModel(
      * settings write, and a lost second of position costs nothing.
      */
     fun rememberPosition() {
+        if (!restored) return
         sessionJob?.cancel()
         sessionJob = scope.launch {
             delay(600)
@@ -366,5 +380,13 @@ class SkemaModel(
             if (diff.removed > 0) add("${diff.removed} gone")
         }
         return parts.joinToString(", ")
+    }
+
+    init {
+        // Synchronous and first, on a file of five numbers. The alternative,
+        // restoring from a coroutine next to the cache load, races the save
+        // debounce and loses: parsing the feed takes longer than the debounce,
+        // so the saver writes today's position over the one being restored.
+        restoreSession()
     }
 }
