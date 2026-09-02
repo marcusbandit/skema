@@ -2,6 +2,8 @@ package com.marcusrosado.skemafordtu.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -264,6 +266,13 @@ fun roomsLabel(rooms: List<String>, cap: Int = Int.MAX_VALUE): String {
 }
 
 /** The weekday heading over a column. Today gets the accent, nothing else does. */
+/**
+ * The mark behind today's number: a line of Type.normal with Space.tight
+ * above and below it, which is the smallest disc that holds two digits with
+ * air around them.
+ */
+private val DAY_DISC = Space.large + Space.tight
+
 @Composable
 fun DayHeading(
     label: String,
@@ -278,10 +287,17 @@ fun DayHeading(
     ) {
         Text(label, color = c.inkMuted, fontSize = Type.small, maxLines = 1)
         Spacer(Modifier.height(2.dp))
+        // A disc, not a pill: the box is held square so a one digit day and a
+        // two digit day wear the same round mark, and the number sits in the
+        // middle of it rather than on its left edge. A true circle rather than
+        // the squircle every other pill is, because a circle has no corner to
+        // smooth and a squared-off disc reads as a badge, not a day.
         Box(
             Modifier
-                .background(if (isToday) c.accent else Color.Transparent, pillShape())
-                .padding(horizontal = Space.tight, vertical = 1.dp),
+                .defaultMinSize(minWidth = DAY_DISC, minHeight = DAY_DISC)
+                .background(if (isToday) c.accent else Color.Transparent, CircleShape)
+                .padding(horizontal = Space.tight),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
                 number,

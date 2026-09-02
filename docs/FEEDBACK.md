@@ -3,6 +3,27 @@
 Verbatim intent from the owner, kept here because it outlives any one session.
 Tick items off only when they are verified on a device, not when they compile.
 
+## Round four, 2026-09-02, built and looked at on the emulator
+
+Two School Planner screenshots came with this round: its drawer, and its
+calendar with the hamburger, the day disc and the three toolbar icons circled.
+
+### Sidebar
+- Make it look like that drawer: the app's name at the top in the accent, a
+  rule under it, big glyphs, a soft pill behind the current view, a rule
+  between the groups. Done. It still pushes rather than overlays.
+- The drawer is 300dp, about two thirds of the folded phone, which is the
+  reference's share. The rail keeps its 176dp so the unfolded pane loses nothing.
+
+### Top bar
+- The icons come from the circled elements: the hamburger at the left, and
+  today, tune and the three dots at the right, all Material's own glyphs.
+  Done. The edge handle is gone; the edge drag still works.
+- Today stays in the row and dims when today is on screen, instead of vanishing.
+- Tune opens Settings. The three dots hold Sync now and Semesters. Both are
+  guesses at what those controls should do here; the owner has not said.
+- The today marker in the day strip is a true circle, like the circled "21".
+
 ## Round three, 2026-09-02, not yet done
 
 ### Header

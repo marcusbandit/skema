@@ -14,13 +14,16 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -55,6 +58,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.marcusrosado.skemafordtu.data.ViewMode
 import com.marcusrosado.skemafordtu.ics.CalendarEvent
 import com.marcusrosado.skemafordtu.ics.Season
@@ -198,7 +203,7 @@ fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
                 Row(Modifier.fillMaxSize()) {
                     SidebarRail(model, Modifier.width(RAIL_WIDTH).fillMaxHeight())
                     Box(Modifier.weight(1f).fillMaxHeight()) {
-                        Panes(model, palette, frame, onJump = { jumping = true })
+                        Panes(model, palette, frame, onJump = { jumping = true }, onMenu = null)
                     }
                 }
             } else {
@@ -206,7 +211,7 @@ fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
                 // pushes the calendar rather than covering it, so the frame
                 // the calendar measured itself against never changes.
                 SidebarScaffold(model, open = menuOpen, onOpenChange = { menuOpen = it }) {
-                    Panes(model, palette, frame, onJump = { jumping = true })
+                    Panes(model, palette, frame, onJump = { jumping = true }, onMenu = { menuOpen = true })
                 }
             }
         }
@@ -256,10 +261,25 @@ private fun jumpYears(model: SkemaModel): IntRange {
     return marks.min()..marks.max()
 }
 
-/** One pane or two, which is a question about the frame and nothing else. */
+/**
+ * One pane or two, which is a question about the frame and nothing else.
+ *
+ * onMenu is null when the sidebar is a rail: there is nothing to open, so
+ * the top bar draws no control for it.
+ */
 @Composable
-private fun Panes(model: SkemaModel, palette: CoursePalette, frame: Frame, onJump: () -> Unit) {
-    if (frame.dual) DualPane(model, palette, frame, onJump) else SinglePane(model, palette, onJump)
+private fun Panes(
+    model: SkemaModel,
+    palette: CoursePalette,
+    frame: Frame,
+    onJump: () -> Unit,
+    onMenu: (() -> Unit)?,
+) {
+    if (frame.dual) {
+        DualPane(model, palette, frame, onJump, onMenu)
+    } else {
+        SinglePane(model, palette, onJump, onMenu)
+    }
 }
 
 @Composable
@@ -268,6 +288,7 @@ private fun DualPane(
     palette: CoursePalette,
     frame: Frame,
     onJump: () -> Unit,
+    onMenu: (() -> Unit)?,
 ) {
     val c = skema
     // A third of the width, floored so the rail can hold a room list and
@@ -281,7 +302,7 @@ private fun DualPane(
 
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            TopBar(model, onJump)
+            TopBar(model, onJump, onMenu)
             Calendar(model, palette, Modifier.weight(1f))
         }
         Box(Modifier.width(1.dp).fillMaxHeight().background(c.hairline))
@@ -301,10 +322,15 @@ private fun DualPane(
 }
 
 @Composable
-private fun SinglePane(model: SkemaModel, palette: CoursePalette, onJump: () -> Unit) {
+private fun SinglePane(
+    model: SkemaModel,
+    palette: CoursePalette,
+    onJump: () -> Unit,
+    onMenu: (() -> Unit)?,
+) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(model, onJump)
+            TopBar(model, onJump, onMenu)
             Calendar(model, palette, Modifier.weight(1f))
         }
         // Always composed, never conditional: a sheet that is removed from
@@ -379,21 +405,36 @@ private fun CalendarBody(model: SkemaModel, palette: CoursePalette) {
     }
 }
 
+/**
+ * The bar above the calendar. Left to right: the menu control while the
+ * sidebar is a drawer, the two line headline, and three controls at the
+ * right end. Those three are the ones every Android user already knows from
+ * that corner, today, tune and more, drawn with Material's own glyphs for
+ * the same reason nobody redraws the back arrow.
+ *
+ * Today stays in the row and dims when today is already on screen. It used
+ * to vanish instead, and a control that comes and goes moves everything
+ * beside it under the finger reaching for it.
+ *
+ * The bar's own side padding is Space.tight rather than Space.medium, so a
+ * control's glyph, which sits Space.small inside its touch target, lands
+ * about where the headline used to start. The headline itself keeps that
+ * old margin by padding when there is no menu control ahead of it.
+ */
 @Composable
-private fun TopBar(model: SkemaModel, onJump: () -> Unit) {
+private fun TopBar(model: SkemaModel, onJump: () -> Unit, onMenu: (() -> Unit)?) {
     val c = skema
 
     // The headline is a date, and a date is somewhere you can go. Agenda is
     // the exception: it is not showing a month, so it has no month to jump to.
     val jumpable = model.view != ViewMode.Agenda
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = Space.medium, vertical = Space.small)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Space.tight, vertical = Space.small)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // No menu control here any more. It was a small glyph in the top
-            // corner, which is the furthest point on an unfolded phone from
-            // anywhere a thumb rests; the drawer's own handle sits down the
-            // left edge instead, where the gesture that opens it starts.
-            Column(Modifier.weight(1f)) {
+            if (onMenu != null) {
+                BarButton(Ico.Menu, "Open the menu", onMenu)
+            }
+            Column(Modifier.weight(1f).padding(start = Space.small)) {
                 Row(
                     // Pulled back by its own padding, so the headline still
                     // starts on the same line as the subhead under it: the
@@ -437,14 +478,14 @@ private fun TopBar(model: SkemaModel, onJump: () -> Unit) {
                 Text(subhead(model), color = c.inkMuted, fontSize = Type.small, maxLines = 1)
             }
 
-            // Offered only when pressing it would move something. Asking
-            // whether the anchor is today was the wrong question: stepping a
-            // day forward and switching to week left the anchor on tomorrow,
-            // same week, so the control appeared and did nothing.
-            if (!model.showingToday) {
-                Spacer(Modifier.width(Space.tight))
-                GlyphButton(Ico.Today, "Go to today", { model.goToday() })
-            }
+            Spacer(Modifier.width(Space.tight))
+            // Live only when pressing it would move something. Asking whether
+            // the anchor is today was the wrong question: stepping a day
+            // forward and switching to week left the anchor on tomorrow, same
+            // week, so the control was live and did nothing.
+            BarButton(Ico.Today, "Go to today", { model.goToday() }, enabled = !model.showingToday)
+            BarButton(Ico.Tune, "Settings", { model.screen = Screen.Settings })
+            Overflow(model)
         }
 
         // "Nothing moved, 736 entries" is worth saying once and then not
@@ -464,8 +505,76 @@ private fun TopBar(model: SkemaModel, onJump: () -> Unit) {
                 color = if (model.failed) c.accentStrong else c.inkMuted,
                 fontSize = Type.small,
                 maxLines = 1,
+                modifier = Modifier.padding(start = Space.small),
             )
         }
+    }
+}
+
+/**
+ * The three dots and what drops out of them: the two things worth reaching
+ * from the calendar that are neither a view nor a setting. Sync is here
+ * because the automatic one is silent and there are moments you want to
+ * know it ran; Semesters because it is the other screen. Anything the
+ * sidebar already offers as a view stays out, or the menu becomes a second
+ * sidebar.
+ *
+ * A plain Popup rather than Material's DropdownMenu, which arrives with its
+ * own corner shape, elevation and colours, all somebody else's app. Focusable
+ * so a tap anywhere else, or back, is the way out.
+ */
+@Composable
+private fun Overflow(model: SkemaModel) {
+    val c = skema
+    val scope = rememberCoroutineScope()
+    var open by remember { mutableStateOf(false) }
+    val shape = SquircleShape(Radius.card)
+
+    Box {
+        BarButton(Ico.More, "More", { open = true })
+        if (open) {
+            Popup(
+                alignment = Alignment.TopEnd,
+                onDismissRequest = { open = false },
+                properties = PopupProperties(focusable = true),
+            ) {
+                Column(
+                    Modifier
+                        .width(IntrinsicSize.Max)
+                        .background(c.surface, shape)
+                        .border(1.dp, c.hairline, shape)
+                        .clip(shape)
+                        .padding(vertical = Space.small),
+                ) {
+                    MenuRow(if (model.busy) "Syncing" else "Sync now", Ico.Sync, enabled = !model.busy) {
+                        open = false
+                        scope.launch { model.refresh() }
+                    }
+                    MenuRow("Semesters", Ico.Fold) {
+                        open = false
+                        model.screen = Screen.Semesters
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** One line of the overflow, in the sidebar's own idiom of glyph then label. */
+@Composable
+private fun MenuRow(label: String, ico: Ico, enabled: Boolean = true, onClick: () -> Unit) {
+    val c = skema
+    val fg = if (enabled) c.ink else c.inkMuted
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = Space.medium, vertical = Space.small),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.medium),
+    ) {
+        Glyph(ico, tint = fg)
+        Text(label, color = fg, fontSize = Type.normal, maxLines = 1)
     }
 }
 

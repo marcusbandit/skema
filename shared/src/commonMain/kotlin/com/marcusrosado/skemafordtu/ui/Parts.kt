@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -97,6 +98,41 @@ fun GlyphButton(
         contentAlignment = Alignment.Center,
     ) {
         Glyph(ico, tint = fg, description = description)
+    }
+}
+
+/**
+ * A top bar control: one glyph, no border, no fill, on a touch target padded
+ * out to what a thumb needs.
+ *
+ * Ink rather than accent, because three accent glyphs in a row would shout
+ * over the headline they sit beside. Disabled dims to muted instead of
+ * vanishing, so the row never reflows under a finger that was reaching for
+ * the control next to it. The description is required for the same reason
+ * it is on GlyphButton: the glyph is the whole control.
+ */
+@Composable
+fun BarButton(
+    ico: Ico,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val c = skema
+    Box(
+        modifier
+            .clip(pillShape())
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(Space.small),
+        contentAlignment = Alignment.Center,
+    ) {
+        Glyph(
+            ico,
+            tint = if (enabled) c.ink else c.inkMuted,
+            size = IconSizeLarge,
+            description = description,
+        )
     }
 }
 

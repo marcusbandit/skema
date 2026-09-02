@@ -10,7 +10,6 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -35,16 +33,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -54,19 +50,30 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * How wide the sidebar is, in both of its presentations.
+ * How wide the rail is.
  *
  * Sized from what one row holds rather than picked: the pill is inset by
- * Space.small either side, pads itself by Space.small either side again, and
- * then spends IconSize on the glyph and Space.small on the gap. That is 68dp
- * of furniture, so 176 leaves 108dp of label, comfortably more than
- * "Semesters" needs at Type.normal.
- *
- * The drawer is this same width. It is the same list in a different place,
- * not a second menu that happens to hold the same rows, and giving it its own
- * width would be the first step towards the two drifting apart.
+ * Space.small either side, pads itself by Space.medium either side again,
+ * and then spends IconSizeLarge on the glyph and Space.medium on the gap.
+ * That is about 94dp of furniture, so 176 leaves 82dp of label, which is
+ * what "Semesters" needs at Type.normal with a little over.
  */
 internal val RAIL_WIDTH = 176.dp
+
+/**
+ * How wide the drawer is, which is no longer how wide the rail is.
+ *
+ * The two used to share one number, on the argument that they are the same
+ * list and a second width was the first step to them drifting apart. The
+ * list is still shared; the width is not, because the two presentations are
+ * paid for differently. A rail is width the calendar never gets back, so it
+ * is as narrow as its longest label allows. A drawer is on screen only while
+ * it is being used, and while it is used it is the thing being read, so it
+ * takes the width a menu wants: a glyph, a gap and a label at a comfortable
+ * pitch, with enough calendar left showing to say where you came from. 300dp
+ * is about two thirds of the folded phone, the share a stock drawer takes.
+ */
+private val DRAWER_WIDTH = 300.dp
 
 /**
  * Where the sidebar stops being a drawer and becomes a permanent rail.
@@ -100,18 +107,16 @@ internal val RAIL_FROM = 640.dp
 private const val DRAWER_MAX_SHARE = 0.8f
 
 /**
- * The grab handle's touch target, and with it the width of the strip down the
- * left edge that a drag has to start inside to count as reaching for the
- * drawer rather than paging the calendar.
+ * The strip down the left edge that a drag has to start inside to count as
+ * reaching for the drawer rather than paging the calendar.
  *
- * 48dp because that is the smallest thing a thumb hits reliably, and because
- * Android's own back gesture owns roughly the first 20dp of the display edge:
- * a 20dp drawer strip, which is what a stock drawer uses, would leave almost
- * nothing to grab on a phone with gesture navigation. The strip and the
- * handle are the same number on purpose, so the affordance IS the place the
- * gesture starts rather than a picture of one somewhere near it.
+ * 48dp because Android's own back gesture owns roughly the first 20dp of the
+ * display edge: a 20dp strip, which is what a stock drawer uses, would leave
+ * almost nothing to grab on a phone with gesture navigation. Nothing is
+ * drawn on it any more. The menu control in the top bar is what says the
+ * drawer exists; this strip is where a finger that already knows pulls it in.
  */
-private val HANDLE_TOUCH = Space.large * 2
+private val EDGE_STRIP = Space.large * 2
 
 /** One row of the sidebar. */
 private class SidebarEntry(
@@ -161,9 +166,14 @@ private fun sidebarGroups(model: SkemaModel, onNavigate: () -> Unit): List<List<
     )
 
 /**
- * One row. Selection is marked the way the app marks it everywhere else, with
- * a filled accent pill, so the current view reads the same here as a chosen
- * option does in the settings screen.
+ * One row, in the shape a stock Android drawer draws it: a large glyph, a
+ * gap, a label, and behind the current view a soft pill. Soft rather than
+ * the solid accent the settings screen uses for a chosen option, because
+ * this pill is a place marker that is up for as long as the drawer is, and a
+ * solid red bar the height of a row is a lot of red to park beside a
+ * calendar. The label and glyph go accent instead, which is what still says
+ * chosen. The other rows are full ink, not muted: a menu is a list of
+ * places to go, and none of them is a lesser place.
  *
  * The glyph carries no description: the label is right beside it and a screen
  * reader would otherwise say the same word twice.
@@ -171,18 +181,19 @@ private fun sidebarGroups(model: SkemaModel, onNavigate: () -> Unit): List<List<
 @Composable
 private fun SidebarRow(entry: SidebarEntry) {
     val c = skema
-    val fg = if (entry.selected) c.onAccent else c.inkMuted
+    val fg = if (entry.selected) c.accent else c.ink
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = Space.small)
-            .background(if (entry.selected) c.accent else Color.Transparent, pillShape())
+            .clip(pillShape())
+            .background(if (entry.selected) c.accentSoft else Color.Transparent)
             .clickable(onClick = entry.onPick)
-            .padding(horizontal = Space.small, vertical = Space.medium),
+            .padding(horizontal = Space.medium, vertical = Space.small),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.small),
+        horizontalArrangement = Arrangement.spacedBy(Space.medium),
     ) {
-        Glyph(entry.ico, tint = fg)
+        Glyph(entry.ico, tint = fg, size = IconSizeLarge)
         Text(
             entry.label,
             color = fg,
@@ -193,29 +204,49 @@ private fun SidebarRow(entry: SidebarEntry) {
     }
 }
 
-/** The rows themselves, shared by the rail and the drawer. */
+/** The title and the rows, shared by the rail and the drawer. */
 @Composable
 private fun SidebarList(model: SkemaModel, modifier: Modifier = Modifier, onNavigate: () -> Unit) {
     val c = skema
     Column(
-        modifier.verticalScroll(rememberScrollState()).padding(vertical = Space.small),
+        modifier.verticalScroll(rememberScrollState()).padding(bottom = Space.small),
         verticalArrangement = Arrangement.spacedBy(Space.unit),
     ) {
-        sidebarGroups(model, onNavigate).forEachIndexed { index, group ->
-            // A rule between the groups rather than around them, so the number
-            // of rules follows the number of groups on its own.
-            if (index > 0) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = Space.medium, vertical = Space.small)
-                        .height(1.dp)
-                        .background(c.hairline),
-                )
-            }
+        // The app's name, in the accent, the way a drawer names the thing it
+        // belongs to. This is the only place the name is printed: the top bar
+        // is spent on where in the calendar you are, not on what app this is.
+        Text(
+            "Skema",
+            color = c.accent,
+            fontSize = Type.large,
+            maxLines = 1,
+            modifier = Modifier.padding(
+                start = Space.large,
+                top = Space.large,
+                end = Space.large,
+                bottom = Space.small,
+            ),
+        )
+        sidebarGroups(model, onNavigate).forEach { group ->
+            // A rule before every group, which puts one under the title and
+            // one between each pair of groups, and the count follows the
+            // number of groups on its own.
+            Rule()
             group.forEach { SidebarRow(it) }
         }
     }
+}
+
+/** A hairline across the sidebar, inset to the title's own margin. */
+@Composable
+private fun Rule() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Space.large, vertical = Space.small)
+            .height(1.dp)
+            .background(skema.hairline),
+    )
 }
 
 /**
@@ -279,11 +310,11 @@ internal fun SidebarScaffold(
     val changeNow by rememberUpdatedState(onOpenChange)
 
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
-        val width = RAIL_WIDTH.coerceAtMost(maxWidth * DRAWER_MAX_SHARE)
+        val width = DRAWER_WIDTH.coerceAtMost(maxWidth * DRAWER_MAX_SHARE)
         val density = LocalDensity.current
         val widthPx = with(density) { width.toPx() }
         val flickPx = with(density) { FLICK.toPx() }
-        val edgePx = with(density) { HANDLE_TOUCH.toPx() }
+        val edgePx = with(density) { EDGE_STRIP.toPx() }
         val scope = rememberCoroutineScope()
 
         // Same reason as the two above: the gesture detector holds the closure
@@ -370,47 +401,7 @@ internal fun SidebarScaffold(
                 ),
         ) {
             content()
-            // Rides with the calendar and fades out as the drawer arrives: it
-            // is the thing you pulled, so it has no business still being there
-            // once the strip it belongs to is on screen.
-            DrawerHandle(
-                enabled = !open,
-                fade = { 1f - slide.value },
-                onOpen = { onOpenChange(true) },
-            )
         }
-    }
-}
-
-/**
- * The one control, and the only reason the gesture is discoverable.
- *
- * Pinned to the middle of the left edge rather than sitting in the top corner
- * the old menu button lived in. On a folded Fold the top corner is a stretch
- * from anywhere a thumb rests, and a corner glyph says "press me" where this
- * says "pull me", which is what the drawer actually wants. The bar is the
- * detail sheet's grab handle turned on its side, on purpose: one idiom for
- * "there is more of this if you drag".
- */
-@Composable
-private fun BoxScope.DrawerHandle(enabled: Boolean, fade: () -> Float, onOpen: () -> Unit) {
-    val c = skema
-    Box(
-        Modifier
-            .align(Alignment.CenterStart)
-            .size(width = HANDLE_TOUCH, height = HANDLE_TOUCH * 2)
-            .graphicsLayer { alpha = fade() }
-            .semantics { contentDescription = "Views and settings" }
-            .clickable(enabled = enabled, onClick = onOpen)
-            .padding(start = Space.tight),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Box(
-            Modifier
-                .width(Space.unit)
-                .height(Space.large + Space.medium)
-                .background(c.inkMuted, pillShape()),
-        )
     }
 }
 
