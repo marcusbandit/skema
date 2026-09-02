@@ -26,6 +26,11 @@ import dk.bandit.skema.ics.CalendarEvent
  * postures, because the difference between folded and unfolded is where this
  * is shown, not what it says: a rail beside the week when there is width for
  * one, a sheet over it when there is not.
+ *
+ * The sheet can be dragged between half height and the whole screen, so it
+ * passes `onToggleExpand` and gets a control for it. The rail cannot: it is
+ * already as tall as the window, so the control is absent there rather than
+ * present and inert.
  */
 @Composable
 fun EventDetail(
@@ -34,6 +39,8 @@ fun EventDetail(
     conflict: Boolean,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    expanded: Boolean = false,
+    onToggleExpand: (() -> Unit)? = null,
 ) {
     val c = skema
     val text = textFor(event.summary, event.location.courseName, event.courseCode, event.fromRoomBooking)
@@ -55,7 +62,19 @@ fun EventDetail(
                 Text(it, color = c.inkMuted, fontSize = Type.small, fontWeight = FontWeight.Medium)
             }
             Spacer(Modifier.weight(1f))
-            PillButton("Close", onClose)
+            onToggleExpand?.let { toggle ->
+                // The chevron points the way the sheet will move, so the
+                // button and the drag say the same thing. Note that reads
+                // inverted against the icon names: a bottom sheet EXPANDS by
+                // travelling up, which is Ico.Collapse's chevron.
+                GlyphButton(
+                    ico = if (expanded) Ico.Expand else Ico.Collapse,
+                    description = if (expanded) "Back to half height" else "Fill the screen",
+                    onClick = toggle,
+                )
+                Spacer(Modifier.size(Space.tight))
+            }
+            GlyphButton(Ico.Close, "Close", onClose)
         }
 
         Spacer(Modifier.height(Space.small))

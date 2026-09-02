@@ -134,6 +134,24 @@ fun relativeLuminance(color: Color): Double =
         0.0722 * decode(color.blue.toDouble())
 
 /**
+ * Straight-line distance in OKLab.
+ *
+ * Two course fills are built at one lightness on purpose, so [contrastRatio]
+ * between any two of them is close to 1:1 whatever their hues; a ratio only
+ * sees luminance and is blind to the thing that tells two courses apart. This
+ * is the measurement that is not blind to it, and it is what
+ * CourseColorsTest asserts a floor on.
+ */
+fun oklabDistance(x: Color, y: Color): Float {
+    val p = x.toOklch()
+    val q = y.toOklch()
+    val dl = (p.l - q.l).toDouble()
+    val da = p.c * cos(p.h * DEG_TO_RAD) - q.c * cos(q.h * DEG_TO_RAD)
+    val db = p.c * sin(p.h * DEG_TO_RAD) - q.c * sin(q.h * DEG_TO_RAD)
+    return sqrt(dl * dl + da * da + db * db).toFloat()
+}
+
+/**
  * The colours for one term, one theme.
  *
  * [codes] is every course code in the feed; blanks are dropped and the rest
@@ -327,14 +345,37 @@ private fun wrapHue(h: Float): Float =
 // ---------------------------------------------------------------------------
 
 /**
- * One hue, four jobs. The lightness values are the design: `fill` is a wash a
- * long way from the ink so a block of text sits on it comfortably, `rail`
- * carries most of the chroma because a 2dp line needs saturation to register
- * at all, and `soft` is barely tinted for dots and hover.
+ * One hue, four jobs. The lightness values are the design: `fill` carries a
+ * block of text, `rail` carries most of the chroma because a 2dp line needs
+ * saturation to register at all, and `soft` is a wash for dots and hover.
  *
- * The numbers were picked by sweeping every hue and taking the worst contrast,
- * which is why they are not round: at fill 0.91 and ink 0.40 the poorest hue in
- * the light theme still clears 6.8:1, and the dark theme's poorest clears 7.9:1.
+ * The numbers come from sweeping every hue at n = 1, 2, 5, 12 and 30 and taking
+ * the worst of three measurements rather than one: ink on fill, fill against
+ * the page background, and the closest pair of fills in OKLab. Only the first
+ * of those was ever checked, which is how the light ramp shipped in the state
+ * described below.
+ *
+ * The light fill sat at L 0.91, C 0.080, and C 0.080 is not reachable at L 0.91.
+ * The sRGB ceiling for a blue at that lightness is C 0.043, so [Oklch.toColor]
+ * did its job and handed back half the asked chroma for the blues while the
+ * yellows got all of it. Two blues in a thirty course term came out 0.0079
+ * apart in OKLab, and against the F4F1EE page the worst block stood at 1.12:1,
+ * so a screen of events read as one pale wash with the hues barely showing.
+ *
+ * Dropping fill to L 0.82 lifts that ceiling to C 0.0895, which is most of the
+ * way to the 0.110 now asked for, so the blues come back nearly saturated: the
+ * closest pair opens to 0.0169 and the worst block stands 1.48:1 off the page.
+ * Ink follows to L 0.37 to pay for the darker fill and the worst ink on fill is
+ * 5.90:1, still clear of the 4.5 floor. Rail follows to L 0.52 and soft to
+ * L 0.93; soft had to move because at L 0.96 it measured 1.01:1 against the
+ * L 0.9596 background, meaning a month view dot was invisible on the page and
+ * only ever showed up on a white card.
+ *
+ * The dark ramp moves the same direction by less, because its background was
+ * lifted at the same time: fill L 0.33 would have fallen to 1.20:1 against the
+ * new 292423, and L 0.39 keeps it at 1.51:1. Dark soft moves furthest, L 0.24
+ * to L 0.34, because 0.24 is below the new background's 0.265 and a hover wash
+ * that darkens the surface it is on is backwards.
  */
 private class Ramp(
     val fillL: Float, val fillC: Float,
@@ -354,17 +395,17 @@ private class Ramp(
 }
 
 private val LightRamp = Ramp(
-    fillL = 0.91f, fillC = 0.080f,
-    inkL = 0.40f, inkC = 0.140f,
-    railL = 0.55f, railC = 0.190f,
-    softL = 0.96f, softC = 0.035f,
+    fillL = 0.82f, fillC = 0.110f,
+    inkL = 0.37f, inkC = 0.150f,
+    railL = 0.52f, railC = 0.200f,
+    softL = 0.93f, softC = 0.055f,
 )
 
 private val DarkRamp = Ramp(
-    fillL = 0.33f, fillC = 0.075f,
-    inkL = 0.86f, inkC = 0.120f,
-    railL = 0.72f, railC = 0.170f,
-    softL = 0.24f, softC = 0.045f,
+    fillL = 0.39f, fillC = 0.095f,
+    inkL = 0.88f, inkC = 0.135f,
+    railL = 0.73f, railC = 0.180f,
+    softL = 0.34f, softC = 0.060f,
 )
 
 // ---------------------------------------------------------------------------

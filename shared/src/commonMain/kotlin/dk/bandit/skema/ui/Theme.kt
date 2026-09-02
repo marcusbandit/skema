@@ -76,19 +76,52 @@ private val Light = SkemaColors(
     isDark = false,
 )
 
+/**
+ * The dark set used to sit at background 121011, surface 1C1819, sunken 0C0A0B,
+ * which measures L 0.176 / 0.214 / 0.148 in OKLab. That is near black, and it
+ * left surface only 1.08:1 off background, so a card did not read as sitting
+ * on the page; both were the same flat dark. The whole set moves up a step, to
+ * L 0.265 / 0.320 / 0.213. Surface now stands 1.20:1 and sunken 1.15:1 against
+ * background, and sunken lands above the old background rather than falling
+ * further towards black.
+ *
+ * Every neutral here is generated from OKLCH hue 25 with chroma climbing 0.007
+ * to 0.014 as lightness climbs, so the warmth holds up at the higher L instead
+ * of washing out. Hue 25 is a few degrees under the accent's measured 29.2. The
+ * hexes that were here before drifted between hue 345.7 and hue 8.0 because
+ * each was picked by hand; one hue makes the red lean deliberate, and it is
+ * that lean which stops these greys reading as the neutral grey every dark
+ * theme ships with.
+ *
+ * hairline goes to L 0.375: 1.48:1 on background and 1.23:1 on surface, up from
+ * 1.30 and 1.20, so it survives the lift on both. inkMuted goes to L 0.680,
+ * which holds 5.29:1 on the lighter background while staying 2.47:1 clear of
+ * ink, close to the 2.62:1 the two had before.
+ *
+ * accentSoft and onAccent move with the rest so they do not end up the two
+ * darkest things left: accentSoft L 0.250 to 0.320 with chroma 0.029 to 0.040,
+ * which keeps it a visible maroon rather than a wash at the higher lightness,
+ * and onAccent L 0.190 to 0.215, still 6.03:1 on the accent it is written on.
+ */
 private val Dark = SkemaColors(
-    background = Color(0xFF121011),
-    surface = Color(0xFF1C1819),
-    surfaceSunken = Color(0xFF0C0A0B),
+    background = Color(0xFF292423),
+    surface = Color(0xFF383130),
+    surfaceSunken = Color(0xFF1C1817),
     ink = Color(0xFFF1ECEA),
-    inkMuted = Color(0xFF9C918E),
+    inkMuted = Color(0xFFA29593),
     accent = Color(0xFFFF6161),
     accentStrong = Color(0xFFFF6161),
-    accentSoft = Color(0xFF2E1C1D),
-    onAccent = Color(0xFF2A0505),
-    hairline = Color(0xFF2E2728),
+    accentSoft = Color(0xFF452B28),
+    onAccent = Color(0xFF310B0A),
+    hairline = Color(0xFF483E3D),
     isDark = true,
 )
+
+/**
+ * The two sets, by theme. [SkemaTheme] chooses with it, and CourseColorsTest
+ * reads the background off it to check an event block is findable on the page.
+ */
+fun skemaColors(dark: Boolean): SkemaColors = if (dark) Dark else Light
 
 val LocalSkemaColors = staticCompositionLocalOf { Light }
 
@@ -97,7 +130,7 @@ val skema: SkemaColors
 
 @Composable
 fun SkemaTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    val c = if (dark) Dark else Light
+    val c = skemaColors(dark)
 
     // Material3 only exists here so the Switch and the text field look right.
     val scheme = if (dark) {

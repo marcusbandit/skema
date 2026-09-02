@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import dk.bandit.skema.data.SkemaRepository
 import dk.bandit.skema.data.ThemeChoice
@@ -26,11 +27,28 @@ import dk.bandit.skema.ui.skema
  */
 @Composable
 fun App() {
-    val model = remember { SkemaModel(SkemaRepository()) }
+    // The model needs a scope to debounce writing settings to disk. The
+    // composition's own scope is right: it dies with the app, and a pending
+    // save that never lands because the app went away is the correct outcome.
+    val scope = rememberCoroutineScope()
+    val model = remember { SkemaModel(SkemaRepository(), scope) }
 
     LaunchedEffect(Unit) {
         model.loadCache()
-        if (model.settings.refreshOnOpen && model.hasUrl) model.refresh()
+        // Position is restored before the first frame so the calendar opens on
+        // the right week rather than opening on today and then jumping. The
+        // fetch is not started here any more: the shell syncs on its own, on
+        // arrival and then on an interval, so opening the app is always a sync
+        // and there is nothing left to opt out of.
+        model.restoreSession()
+    }
+
+    // Anything that changes "where you are" re-arms the debounced save. Keyed
+    // declaratively rather than called from each navigation site, so a new way
+    // to move around the calendar is remembered without anyone remembering to
+    // wire it up.
+    LaunchedEffect(model.anchor, model.selected, model.view, model.hourHeight) {
+        model.rememberPosition()
     }
 
     val dark = when (model.settings.theme) {

@@ -53,6 +53,22 @@ class SkemaRepository(
         vault.write(SETTINGS_FILE, json.encodeToString(settings))
     }
 
+
+    /**
+     * Where the user was, kept separately from settings because it is not a
+     * preference: it is a fact with a shelf life, and mixing it into the
+     * settings file would mean every scroll rewrote the user's choices.
+     */
+    fun session(): Session? =
+        vault.read(SESSION_FILE)?.let { runCatching { json.decodeFromString<Session>(it) }.getOrNull() }
+
+    fun saveSession(session: Session) {
+        vault.write(SESSION_FILE, json.encodeToString(session))
+    }
+
+    fun clearSession() {
+        vault.delete(SESSION_FILE)
+    }
     /** The last feed we pulled, parsed. Null before the first successful fetch. */
     fun cached(): Snapshot? {
         val raw = vault.read(FEED_FILE) ?: return null

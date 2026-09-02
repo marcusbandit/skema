@@ -60,11 +60,16 @@ fun SettingsScreen(model: SkemaModel) {
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
-            PillButton("Done", { model.screen = Screen.Calendar }, filled = true)
+            PillButton(
+                "Done",
+                { model.screen = Screen.Calendar },
+                filled = true,
+                ico = Ico.Check,
+            )
         }
 
         Spacer(Modifier.height(Space.large))
-        SectionLabel("Calendar link")
+        SectionLabel("Calendar link", Ico.Link)
 
         Card(Modifier.fillMaxWidth()) {
             Column {
@@ -111,8 +116,15 @@ fun SettingsScreen(model: SkemaModel) {
                         onClick = { scope.launch { model.refresh() } },
                         filled = true,
                         enabled = !model.busy && model.hasUrl,
+                        ico = Ico.Sync,
                     )
                     if (model.status.isNotBlank()) {
+                        // A failed sync gets the outline warning, not the
+                        // solid clash triangle: this lands on paper beside
+                        // muted text, and clash means two classes at once.
+                        if (model.failed) {
+                            Glyph(Ico.Warn, tint = c.accentStrong, size = IconSizeQuiet)
+                        }
                         Text(
                             model.status,
                             color = if (model.failed) c.accentStrong else c.inkMuted,
@@ -124,18 +136,11 @@ fun SettingsScreen(model: SkemaModel) {
         }
 
         Spacer(Modifier.height(Space.large))
-        SectionLabel("Behaviour")
+        SectionLabel("Behaviour", Ico.Tune)
 
         Card(Modifier.fillMaxWidth(), PaddingValues(Space.small)) {
             Column {
-                Column(Modifier.padding(Space.small)) {
-                    Text(
-                        "Theme",
-                        color = c.ink,
-                        fontSize = Type.normal,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Spacer(Modifier.height(Space.tight))
+                Picker("Theme", Ico.Theme) {
                     Segmented(
                         options = ThemeChoice.entries,
                         selected = model.settings.theme,
@@ -145,14 +150,7 @@ fun SettingsScreen(model: SkemaModel) {
                     )
                 }
                 Divider()
-                Column(Modifier.padding(Space.small)) {
-                    Text(
-                        "Calendar view",
-                        color = c.ink,
-                        fontSize = Type.normal,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Spacer(Modifier.height(Space.tight))
+                Picker("Calendar view", Ico.Layout) {
                     Segmented(
                         options = ViewMode.entries,
                         selected = model.settings.view,
@@ -164,6 +162,7 @@ fun SettingsScreen(model: SkemaModel) {
                 Divider()
                 Toggle(
                     title = "Show Saturday and Sunday",
+                    ico = Ico.Month,
                     detail = "A teaching week runs Monday to Friday, so the weekend is left out and its width goes to the five days that hold something.",
                     checked = model.settings.showWeekend,
                     onChange = { v -> model.update { it.copy(showWeekend = v) } },
@@ -171,22 +170,16 @@ fun SettingsScreen(model: SkemaModel) {
                 Divider()
                 Toggle(
                     title = "Fold duplicate entries",
+                    ico = Ico.Fold,
                     detail = "DTU lists most classes twice, once written by a teacher and once generated from the room booking. Merge the pair field by field: where the two differ the teacher's entry wins, and where it says nothing the booking fills in, which is how the rooms survive.",
                     checked = model.settings.collapseDuplicates,
                     onChange = { v -> model.update { it.copy(collapseDuplicates = v) } },
-                )
-                Divider()
-                Toggle(
-                    title = "Sync when the app opens",
-                    detail = "The feed sends no last-modified header, so every sync pulls the whole calendar and works out what moved.",
-                    checked = model.settings.refreshOnOpen,
-                    onChange = { v -> model.update { it.copy(refreshOnOpen = v) } },
                 )
             }
         }
 
         Spacer(Modifier.height(Space.large))
-        SectionLabel("Subjects")
+        SectionLabel("Subjects", Ico.Palette)
 
         Card(Modifier.fillMaxWidth(), PaddingValues(Space.small)) {
             Column {
@@ -214,7 +207,7 @@ fun SettingsScreen(model: SkemaModel) {
         }
 
         Spacer(Modifier.height(Space.large))
-        SectionLabel("What is cached")
+        SectionLabel("What is cached", Ico.Storage)
 
         Card(Modifier.fillMaxWidth()) {
             Column {
@@ -225,7 +218,7 @@ fun SettingsScreen(model: SkemaModel) {
                 Fact("Stored in", model.storageLocation)
 
                 Spacer(Modifier.height(Space.medium))
-                PillButton("Forget the cached calendar", { model.forget() })
+                PillButton("Forget the cached calendar", { model.forget() }, ico = Ico.Trash)
             }
         }
 
@@ -233,24 +226,67 @@ fun SettingsScreen(model: SkemaModel) {
     }
 }
 
+/**
+ * A section heading. The glyph is what makes a wall of settings scannable:
+ * you find the link section by its shape long before you have read the word.
+ */
 @Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text.uppercase(),
-        color = skema.inkMuted,
-        fontSize = Type.small,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.padding(bottom = Space.tight, start = Space.unit),
-    )
+private fun SectionLabel(text: String, ico: Ico) {
+    Row(
+        Modifier.padding(bottom = Space.tight, start = Space.unit),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.tight),
+    ) {
+        Glyph(ico, tint = skema.inkMuted, size = IconSizeQuiet)
+        Text(
+            text.uppercase(),
+            color = skema.inkMuted,
+            fontSize = Type.small,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+/** A titled row holding a chooser, shaped like [Toggle] so the card lines up. */
+@Composable
+private fun Picker(title: String, ico: Ico, content: @Composable () -> Unit) {
+    val c = skema
+    Row(Modifier.fillMaxWidth().padding(Space.small), verticalAlignment = Alignment.Top) {
+        // Centred in a box one type step tall, so the glyph lands on the
+        // title's line rather than riding above it.
+        Box(Modifier.height(Space.large), contentAlignment = Alignment.Center) {
+            Glyph(ico, tint = c.inkMuted)
+        }
+        Spacer(Modifier.width(Space.small))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = c.ink, fontSize = Type.normal, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(Space.tight))
+            content()
+        }
+    }
 }
 
 @Composable
-private fun Toggle(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun Toggle(
+    title: String,
+    detail: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    ico: Ico,
+) {
     val c = skema
     Row(
         Modifier.fillMaxWidth().padding(Space.small),
         verticalAlignment = Alignment.Top,
     ) {
+        // The glyphs line up in a column of their own, so the titles start on
+        // one edge whatever shape sits beside them.
+        // Centred in a box one type step tall, so the glyph lands on the
+        // title's line rather than riding above it.
+        Box(Modifier.height(Space.large), contentAlignment = Alignment.Center) {
+            Glyph(ico, tint = c.inkMuted)
+        }
+        Spacer(Modifier.width(Space.small))
         Column(Modifier.weight(1f)) {
             Text(title, color = c.ink, fontSize = Type.normal, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(2.dp))

@@ -137,6 +137,135 @@ class CourseColorsTest {
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Separation: the block against the page, and the blocks against each other
+    // -----------------------------------------------------------------------
+
+    /**
+     * Ink on fill was the only thing measured before, and a palette can pass it
+     * while every block on the screen looks the same. These two floors cover
+     * the rest: can you see a block at all, and can you see that two of them
+     * differ. Both are set from what the palette actually holds, with the
+     * numbers below.
+     *
+     * A filled area has no WCAG floor, so this one is chosen: the light fill
+     * measures 1.48:1 worst case and the dark 1.51:1, while the ramp that
+     * shipped before measured 1.12:1 and the owner reported it as a wash. 1.25
+     * clears both of the new numbers and fails the old one, which is the point
+     * of having it.
+     */
+    private val fillOnBackgroundFloor = 1.25f
+
+    /**
+     * Two fills share a lightness by construction, so a contrast ratio between
+     * them stays near 1:1 whatever the hues and proves nothing; the separation
+     * is a distance in OKLab instead. Roughly 0.02 there is one just noticeable
+     * difference for an isolated patch, and rather less is needed for two
+     * blocks meeting along an edge, which is how events actually appear.
+     *
+     * 0.010 is the floor because the dark theme cannot do much better at n=30:
+     * a cyan at fill lightness 0.39 hits the sRGB ceiling at C 0.066, so the
+     * pair at hue 192.6 and 203.7 measures 0.0120 with its chroma already
+     * maxed out, and light manages 0.0169. n=30 is the pathological end of the
+     * range; at n=12 the closest pair is 0.0341 dark and 0.0440 light, and at
+     * n=5 both are past 0.09. The old light ramp measured 0.0079 here.
+     */
+    private val fillSeparationFloor = 0.010f
+
+    @Test
+    fun anEventBlockIsDistinguishableFromThePageItSitsOn() {
+        for (dark in listOf(false, true)) {
+            val background = skemaColors(dark).background
+            var worst = Float.MAX_VALUE
+            var worstAt = ""
+            for (n in sizes) {
+                val p = CoursePalette(codes(n), dark = dark)
+                for (code in codes(n)) {
+                    val ratio = contrastRatio(p.tint(code).fill, background)
+                    if (ratio < worst) {
+                        worst = ratio
+                        worstAt = "n=$n $code hue ${p.hue(code)}"
+                    }
+                    assertTrue(
+                        ratio >= fillOnBackgroundFloor,
+                        "dark=$dark n=$n $code hue ${p.hue(code)} fill on background is $ratio",
+                    )
+                }
+            }
+            val neutral = contrastRatio(CoursePalette(emptyList(), dark = dark).neutral.fill, background)
+            assertTrue(neutral >= fillOnBackgroundFloor, "neutral fill on background dark=$dark is $neutral")
+            println(
+                "separation: ${if (dark) "dark " else "light"} fill-on-background " +
+                    "worst ${round2(worst)}:1 at $worstAt, neutral ${round2(neutral)}:1",
+            )
+        }
+    }
+
+    @Test
+    fun noTwoCoursesInATermShareALook() {
+        // Every pair, not only the hue neighbours. For this ramp the two agree,
+        // because the fills sit at one lightness and the closest pair is always
+        // the closest in hue. That equivalence rests on the ramp, though, and a
+        // future ramp that varied lightness per hue would break it, so the test
+        // does not assume it: 435 comparisons at n=30 costs nothing.
+        for (dark in listOf(false, true)) {
+            var worst = Float.MAX_VALUE
+            var worstAt = ""
+            for (n in sizes) {
+                if (n < 2) continue
+                val p = CoursePalette(codes(n), dark = dark)
+                val all = codes(n)
+                for (i in all.indices) {
+                    for (j in i + 1 until all.size) {
+                        val d = oklabDistance(p.tint(all[i]).fill, p.tint(all[j]).fill)
+                        if (d < worst) {
+                            worst = d
+                            worstAt = "n=$n hues ${p.hue(all[i])}/${p.hue(all[j])}"
+                        }
+                        assertTrue(
+                            d >= fillSeparationFloor,
+                            "dark=$dark n=$n ${all[i]} and ${all[j]} are $d apart in OKLab",
+                        )
+                    }
+                }
+            }
+            println(
+                "separation: ${if (dark) "dark " else "light"} closest pair of fills " +
+                    "$worst in OKLab at $worstAt",
+            )
+        }
+    }
+
+    @Test
+    fun aCourseKeepsItsColourWhenTheThemeFlips() {
+        // Only L and C differ between the ramps. If a hue ever moved, a course
+        // would change identity on a theme switch, which is worse than either
+        // theme being slightly off.
+        //
+        // The tolerance is not zero because a Color holds 8 bits per channel:
+        // reading the hue back off two colours that differ in lightness picks
+        // up the rounding, worst measured 1.19 degrees on light soft at C 0.055,
+        // where the smallest chroma makes the rounding count for most.
+        val tolerance = 2.5f
+        val all = codes(12)
+        val light = CoursePalette(all, dark = false)
+        val dark = CoursePalette(all, dark = true)
+        for (code in all) {
+            for (pair in listOf(
+                light.tint(code).fill to dark.tint(code).fill,
+                light.tint(code).rail to dark.tint(code).rail,
+                light.tint(code).ink to dark.tint(code).ink,
+                light.tint(code).soft to dark.tint(code).soft,
+            )) {
+                val (l, d) = pair
+                assertTrue(
+                    hueDistance(l.toOklch().h, d.toOklch().h) < tolerance,
+                    "$code moved hue across themes: ${l.toOklch().h} to ${d.toOklch().h}",
+                )
+            }
+        }
+    }
+
     private fun round2(v: Float) = (kotlin.math.round(v * 100f) / 100f).toString()
 
     // -----------------------------------------------------------------------

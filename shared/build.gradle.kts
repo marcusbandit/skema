@@ -27,6 +27,8 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
+            implementation(libs.compose.icons.lucide)
+            implementation(libs.compose.icons.fontawesome)
         }
         commonTest.dependencies { implementation(kotlin("test")) }
         androidMain.dependencies { implementation(libs.ktor.client.okhttp) }

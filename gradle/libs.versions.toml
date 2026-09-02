@@ -7,6 +7,8 @@ serialization = "1.11.0"
 datetime = "0.8.0"
 coroutines = "1.11.0"
 activityCompose = "1.13.0"
+composeIcons = "1.1.1"
+lucideIcons = "1.1.0"
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
@@ -25,3 +27,7 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "datetime" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+# Icon packs, both published as Compose Multiplatform ImageVectors, so no
+# drawable folder and nothing platform-specific to keep in step.
+compose-icons-fontawesome = { module = "br.com.devsrsouza.compose.icons:font-awesome", version.ref = "composeIcons" }
+compose-icons-lucide = { module = "com.composables:icons-lucide", version.ref = "lucideIcons" }

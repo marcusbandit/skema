@@ -3,6 +3,7 @@ package dk.bandit.skema.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,7 +17,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-/** A pill button. Text only, because icon packs are a dependency we do not need. */
+/**
+ * A pill button, with an optional glyph before the label.
+ *
+ * The glyph carries no description on purpose: the label is right beside it,
+ * and a screen reader that read both would say the same word twice.
+ */
 @Composable
 fun PillButton(
     label: String,
@@ -24,6 +30,7 @@ fun PillButton(
     modifier: Modifier = Modifier,
     filled: Boolean = false,
     enabled: Boolean = true,
+    ico: Ico? = null,
 ) {
     val c = skema
     val shape = pillShape()
@@ -40,33 +47,88 @@ fun PillButton(
             .padding(horizontal = Space.medium, vertical = Space.tight),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            label,
-            color = fg,
-            fontSize = Type.small,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Space.tight),
+        ) {
+            if (ico != null) Glyph(ico, tint = fg, size = IconSizeQuiet)
+            Text(
+                label,
+                color = fg,
+                fontSize = Type.small,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
-/** A small tag, used for course codes and for the conflict marker. */
+/**
+ * The same control with the label taken away, for the square slots in a
+ * toolbar where a word would not fit.
+ *
+ * The description is required rather than defaulted. A button whose entire
+ * content is a picture tells a screen reader nothing without one, and a
+ * parameter you can forget is a parameter that gets forgotten.
+ */
+@Composable
+fun GlyphButton(
+    ico: Ico,
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    filled: Boolean = false,
+    enabled: Boolean = true,
+) {
+    val c = skema
+    val shape = SquircleShape(Radius.chip)
+    val fg = when {
+        !enabled -> c.inkMuted
+        filled -> c.onAccent
+        else -> c.accent
+    }
+    Box(
+        modifier
+            .background(if (filled && enabled) c.accent else Color.Transparent, shape)
+            .then(if (filled) Modifier else Modifier.border(1.dp, c.hairline, shape))
+            .clickable(enabled = enabled, onClick = onClick)
+            // Equal on all four sides, which is what makes the control square.
+            .padding(Space.tight),
+        contentAlignment = Alignment.Center,
+    ) {
+        Glyph(ico, tint = fg, description = description)
+    }
+}
+
+/**
+ * A small tag, used for course codes and for the conflict marker.
+ *
+ * A tag sits on a filled colour field, so the glyph it takes is one of the
+ * solid ones. See Icons.kt for why that split exists.
+ */
 @Composable
 fun Tag(
     label: String,
     modifier: Modifier = Modifier,
     background: Color = skema.accentSoft,
     foreground: Color = skema.accent,
+    ico: Ico? = null,
 ) {
-    Text(
-        label,
-        modifier = modifier
+    Row(
+        modifier
             .background(background, SquircleShape(Radius.chip))
             .padding(horizontal = Space.tight, vertical = 2.dp),
-        color = foreground,
-        fontSize = Type.small,
-        fontWeight = FontWeight.Medium,
-    )
+        horizontalArrangement = Arrangement.spacedBy(Space.unit),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (ico != null) Glyph(ico, tint = foreground, size = IconSizeQuiet)
+        Text(
+            label,
+            color = foreground,
+            fontSize = Type.small,
+            fontWeight = FontWeight.Medium,
+        )
+    }
 }
 
 /**

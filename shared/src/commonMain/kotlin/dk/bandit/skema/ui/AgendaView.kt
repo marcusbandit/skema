@@ -190,14 +190,27 @@ private fun EventRow(row: AgendaRow.Entry, tint: CourseTint, onPick: () -> Unit)
                 }
                 if (e.rooms.isNotEmpty()) {
                     Spacer(Modifier.height(2.dp))
-                    // Every room, wrapped. The DTU page puts them on one line
-                    // and clips the tail, which is the thing that started all
-                    // of this.
-                    Text(
-                        e.rooms.joinToString(SEPARATOR),
-                        color = c.inkMuted,
-                        fontSize = Type.small,
-                    )
+                    // Every room, wrapped, behind a pin. The DTU page puts
+                    // them on one line and clips the tail, which is the thing
+                    // that started all of this. The pin is what tells you the
+                    // line is a place and not another course name, and it is
+                    // described because nothing else in the row says "room".
+                    Row(
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(Space.unit),
+                    ) {
+                        Glyph(
+                            Ico.Room,
+                            tint = c.inkMuted,
+                            size = IconSizeQuiet,
+                            description = "Rooms",
+                        )
+                        Text(
+                            e.rooms.joinToString(SEPARATOR),
+                            color = c.inkMuted,
+                            fontSize = Type.small,
+                        )
+                    }
                 }
                 if (e.courseCode != null || row.conflict) {
                     Spacer(Modifier.height(Space.tight))
@@ -210,7 +223,14 @@ private fun EventRow(row: AgendaRow.Entry, tint: CourseTint, onPick: () -> Unit)
                             )
                         }
                         if (row.conflict) {
-                            Tag("clash", background = c.accentStrong, foreground = c.onAccent)
+                            // Solid triangle on a solid red field: at this
+                            // size an outline stroke would sink into the fill.
+                            Tag(
+                                "clash",
+                                background = c.accentStrong,
+                                foreground = c.onAccent,
+                                ico = Ico.Clash,
+                            )
                         }
                     }
                 }

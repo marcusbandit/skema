@@ -6,12 +6,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dk.bandit.skema.data.Diff
 import dk.bandit.skema.data.Refresh
+import dk.bandit.skema.data.Session
 import dk.bandit.skema.data.SkemaRepository
 import dk.bandit.skema.data.SkemaSettings
 import dk.bandit.skema.data.Snapshot
 import dk.bandit.skema.data.ViewMode
 import dk.bandit.skema.ics.CalendarEvent
 import dk.bandit.skema.ics.Dedup
+import dk.bandit.skema.ics.Term
+import dk.bandit.skema.ics.Terms
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.minus
@@ -50,7 +59,10 @@ fun CalendarEvent.endMinute(): Int {
  * the zoom and the selection survive because they were never owned by the
  * composable that got resized.
  */
-class SkemaModel(private val repo: SkemaRepository) {
+class SkemaModel(
+    private val repo: SkemaRepository,
+    private val scope: CoroutineScope,
+) {
 
     var screen by mutableStateOf(Screen.Calendar)
 
@@ -85,7 +97,16 @@ class SkemaModel(private val repo: SkemaRepository) {
     var picked by mutableStateOf<CalendarEvent?>(null)
 
     val view: ViewMode get() = settings.view
-    val hourHeight: Float get() = settings.hourHeight
+
+    /**
+     * The zoom is held here, not read back out of settings, because it changes
+     * once per pointer event during a pinch. Routing that through `update`
+     * encoded the whole settings object and wrote a file on the main thread
+     * sixty times a second, which is what made pinching feel stuck rather
+     * than smooth. It is still persisted, just not on the hot path.
+     */
+    var hourHeight by mutableStateOf(repo.settings().hourHeight)
+        private set
 
     val storageLocation: String get() = repo.storageLocation
     val hasUrl: Boolean get() = settings.feedUrl.isNotBlank()
@@ -99,10 +120,42 @@ class SkemaModel(private val repo: SkemaRepository) {
      * What the calendar actually draws: merged when the setting is on, raw
      * when it is off, so the toggle shows you the feed's own redundancy.
      */
+    /**
+     * The enrolment date, or null while it has not been set.
+     *
+     * Parsed leniently: a hand-edited settings file with a broken date should
+     * show the whole feed, not crash on launch.
+     */
+    val enrolledFrom: LocalDate?
+        get() = settings.enrolledFrom?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
     private val visibleState = derivedStateOf {
-        if (settings.collapseDuplicates) Dedup.collapse(events) else events
+        val merged = if (settings.collapseDuplicates) Dedup.collapse(events) else events
+        val from = enrolledFrom
+        if (from == null) merged else merged.filter { it.start.date >= from }
     }
     val visible: List<CalendarEvent> get() = visibleState.value
+
+    /** Every semester the visible feed touches, oldest first. */
+    private val termsState = derivedStateOf {
+        visible.map { Terms.of(it) }.distinct().sorted()
+    }
+    val terms: List<Term> get() = termsState.value
+
+    fun eventsIn(term: Term): List<CalendarEvent> = visible.filter { Terms.of(it) == term }
+
+    /** Course codes taught in a semester, in the order the palette assigns them. */
+    fun coursesIn(term: Term): List<String> =
+        eventsIn(term).mapNotNull { it.courseCode }.distinct().sorted()
+
+    /**
+     * What to offer as an enrolment date before one is set: the start of the
+     * earliest semester DTU actually named. On the owner's feed that is Fall
+     * 2025, which is right, and it beats asking someone to remember a date
+     * the feed already knows.
+     */
+    val suggestedEnrolment: LocalDate?
+        get() = events.mapNotNull { Terms.parse(it.location.courseName) }.minOrNull()?.startsOn
 
     private val byDayState = derivedStateOf {
         visible.groupBy { it.start.date }.mapValues { (_, v) -> v.sortedBy { it.startMinute() } }
@@ -144,6 +197,27 @@ class SkemaModel(private val repo: SkemaRepository) {
         selected = today()
     }
 
+    /**
+     * Whether today is already on screen, which decides if a "today" control
+     * is worth offering.
+     *
+     * Asking "is the anchor today" was the wrong question: stepping one day
+     * forward in the day view and switching to week left the anchor on
+     * tomorrow, which is the same week, so the control appeared and pressing
+     * it changed nothing. The honest test is whether the period being shown
+     * already contains today.
+     */
+    val showingToday: Boolean
+        get() {
+            val now = today()
+            return when (view) {
+                ViewMode.Month -> anchor.year == now.year && anchor.month == now.month
+                ViewMode.Week -> weekStart(anchor) == weekStart(now)
+                ViewMode.Day -> selected == now
+                ViewMode.Agenda -> true
+            }
+        }
+
     fun select(date: LocalDate) {
         selected = date
         anchor = date
@@ -160,8 +234,14 @@ class SkemaModel(private val repo: SkemaRepository) {
      */
     fun zoomBy(factor: Float) {
         val next = Grid.clampHour(hourHeight * factor)
-        if (next != hourHeight) update { it.copy(hourHeight = next) }
+        if (next != hourHeight) {
+            hourHeight = next
+            persist()
+        }
     }
+
+    val atMinZoom: Boolean get() = hourHeight <= Grid.MIN_HOUR + 0.01f
+    val atMaxZoom: Boolean get() = hourHeight >= Grid.MAX_HOUR - 0.01f
 
     fun setHue(code: String, hue: Float?) = update {
         val m = it.courseHues.toMutableMap()
@@ -169,13 +249,71 @@ class SkemaModel(private val repo: SkemaRepository) {
         it.copy(courseHues = m)
     }
 
+    /**
+     * Put the user back where they were, if they were there recently.
+     *
+     * Called once at startup, before the first frame, so the calendar opens
+     * on the right week rather than opening on today and then jumping.
+     */
+    fun restoreSession() {
+        val saved = repo.session() ?: return
+        if (!saved.isFreshAt(nowSeconds())) {
+            // Stale: they closed it properly, or that was yesterday. A
+            // calendar opening cold should open on today.
+            repo.clearSession()
+            return
+        }
+        settings = settings.copy(view = saved.view)
+        anchor = LocalDate.fromEpochDays(saved.anchorEpochDay)
+        selected = LocalDate.fromEpochDays(saved.selectedEpochDay)
+        hourHeight = Grid.clampHour(saved.hourHeight)
+    }
+
+    private var sessionJob: Job? = null
+
+    /**
+     * Records the position, debounced. Every swipe between weeks calls this,
+     * so it must not touch the disk on the gesture; the same reasoning as the
+     * settings write, and a lost second of position costs nothing.
+     */
+    fun rememberPosition() {
+        sessionJob?.cancel()
+        sessionJob = scope.launch {
+            delay(600)
+            val snapshot = Session(
+                view = view,
+                anchorEpochDay = anchor.toEpochDays(),
+                selectedEpochDay = selected.toEpochDays(),
+                hourHeight = hourHeight,
+                savedAtEpochSeconds = nowSeconds(),
+            )
+            withContext(Dispatchers.Default) { repo.saveSession(snapshot) }
+        }
+    }
+
     fun loadCache() {
         repo.cached()?.let(::adopt)
     }
 
+    private var saveJob: Job? = null
+
+    /**
+     * Settings reach the disk once the user has stopped fiddling, and off the
+     * main thread. Nothing here needs to survive a crash within half a second
+     * of a gesture, and every writer of settings is a gesture.
+     */
+    private fun persist() {
+        saveJob?.cancel()
+        saveJob = scope.launch {
+            delay(400)
+            val snapshot = settings.copy(hourHeight = hourHeight)
+            withContext(Dispatchers.Default) { repo.saveSettings(snapshot) }
+        }
+    }
+
     fun update(change: (SkemaSettings) -> SkemaSettings) {
         settings = change(settings)
-        repo.saveSettings(settings)
+        persist()
     }
 
     suspend fun refresh() {

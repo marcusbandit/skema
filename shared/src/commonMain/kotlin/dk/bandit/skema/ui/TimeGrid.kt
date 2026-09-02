@@ -39,13 +39,15 @@ import kotlin.math.min
  */
 
 /**
- * The slice of the day worth drawing.
+ * The day the grid plots against, which is all of it.
  *
- * A university timetable occupies roughly a third of the 24 hours it is
- * plotted against, and the other two thirds are empty grid the user has to
- * scroll past. So the window is derived from the events themselves rather
- * than fixed at 00:00 to 24:00, with an hour of air either side so the first
- * and last block are not welded to the edge.
+ * This used to be derived from the events, padded an hour either side and
+ * grown to a minimum span. That produced a grid that started at 07:00 on one
+ * week and 09:00 on another, and ended wherever the last booking happened to
+ * be, so the same 13:00 sat at a different height depending on what else was
+ * in view. Half a day is not a day. The window is now midnight to midnight,
+ * always, and finding the part you care about is the zoom's job and the
+ * opening scroll's job, not the window's.
  */
 data class DayWindow(val startHour: Int, val endHour: Int) {
 
@@ -62,23 +64,22 @@ data class DayWindow(val startHour: Int, val endHour: Int) {
         (((toMinute - fromMinute).coerceAtLeast(Lanes.MIN_MINUTES)) / 60f * hourHeight).dp
 
     companion object {
-        /** Below this the grid stops reading as a day and starts reading as a bar chart. */
-        const val MIN_SPAN_HOURS = 8
+        /** Midnight to midnight. The only window there is. */
+        val FULL = DayWindow(0, 24)
 
-        fun of(events: List<CalendarEvent>): DayWindow {
+        /** Kept so call sites read the same; the events no longer decide. */
+        fun of(@Suppress("UNUSED_PARAMETER") events: List<CalendarEvent>): DayWindow = FULL
+
+        /**
+         * Where to park the scroll when a day first appears: the earliest
+         * event, backed off by a margin so it is not welded to the top edge.
+         * Falls back to the working morning on an empty day rather than to
+         * midnight, because midnight is never what you wanted to look at.
+         */
+        fun openingMinute(events: List<CalendarEvent>): Int {
             val timed = events.filterNot { it.allDay }
-            if (timed.isEmpty()) return DayWindow(8, 18)
-
-            val first = timed.minOf { it.startMinute() } / 60
-            val last = ceil(timed.maxOf { it.endMinute() } / 60f).toInt()
-
-            var lo = max(0, first - 1)
-            var hi = min(24, last + 1)
-            // Grow, rather than shift, when the day is too thin to read.
-            while (hi - lo < MIN_SPAN_HOURS) {
-                if (hi < 24) hi++ else if (lo > 0) lo-- else break
-            }
-            return DayWindow(lo, hi)
+            val first = timed.minOfOrNull { it.startMinute() } ?: (8 * 60)
+            return (first - 60).coerceIn(0, 23 * 60)
         }
     }
 }

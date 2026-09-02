@@ -58,6 +58,16 @@ private val DOT = Space.tight
 private val DOT_GAP = Space.unit / 2
 
 /**
+ * The clash mark, twice the dot.
+ *
+ * A warning triangle drawn at 6dp is a smudge, and this is the one thing in a
+ * month cell worth interrupting the pattern for. It is also the tallest thing
+ * the dot row can hold, so it is what the row reserves, which is what keeps
+ * every date number in a week sitting on the same line.
+ */
+private val MARK = DOT * 2
+
+/**
  * Space kept back for the "+n" when the dots overflow.
  *
  * Compose cannot tell you how wide a string will be before it lays it out, and
@@ -74,6 +84,7 @@ fun MonthView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Mo
 
     // One walk of the feed for the whole grid, rather than one per cell.
     val byDay = remember(model.events, model.settings.collapseDuplicates) { model.byDay }
+    val conflicts = remember(model.events) { model.conflicts }
 
     // Anchored to this month, so a restored pager state and a freshly computed
     // origin still agree on which page is which month.
@@ -105,8 +116,12 @@ fun MonthView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Mo
             .background(c.background)
             .pinchZoom { factor ->
                 // The month has no hour height, so it is sitting at both ends
-                // of a zoom it does not have; the pressure alone decides. Only
-                // the outward pinch has anywhere to go, and that is the week.
+                // of a zoom it does not have; the pressure alone decides, and
+                // model.hourHeight is deliberately neither read nor written
+                // here. Only the outward pinch has anywhere to go: a positive
+                // step is one view narrower, which is the week. A pinch the
+                // other way returns -1 and is dropped, because nothing in the
+                // app is wider than a month.
                 if (pressure.feed(factor, atMin = true, atMax = true) > 0) {
                     model.setView(ViewMode.Week)
                 }
@@ -115,6 +130,7 @@ fun MonthView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Mo
         MonthPage(
             month = origin.plus(page - MONTH_SPAN, DateTimeUnit.MONTH),
             byDay = byDay,
+            conflicts = conflicts,
             palette = palette,
             onOpen = { date ->
                 model.select(date)
@@ -130,6 +146,7 @@ fun MonthView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Mo
 private fun MonthPage(
     month: LocalDate,
     byDay: Map<LocalDate, List<CalendarEvent>>,
+    conflicts: Set<Long>,
     palette: CoursePalette,
     onOpen: (LocalDate) -> Unit,
 ) {
@@ -172,11 +189,13 @@ private fun MonthPage(
                     Row(Modifier.weight(1f).fillMaxWidth()) {
                         for (i in 0 until WEEK) {
                             val date = gridStart.shift(w * WEEK + i)
+                            val events = byDay[date].orEmpty()
                             MonthCell(
                                 date = date,
                                 inMonth = date >= month && date < next,
                                 isToday = date == reference,
-                                events = byDay[date].orEmpty(),
+                                events = events,
+                                clash = events.any { it.startEpochSeconds in conflicts },
                                 palette = palette,
                                 width = cell,
                                 onOpen = { onOpen(date) },
@@ -190,12 +209,27 @@ private fun MonthPage(
     }
 }
 
+/**
+ * One day of the grid: its number, and what is on.
+ *
+ * The two are one group, centred in the cell. Pinned to the top they left the
+ * whole lower half of every cell empty, and since the rows take an equal share
+ * of the height, the taller the frame the worse it read; a five week month on
+ * an unfolded screen was a line of numbers with a hand's width of nothing
+ * under each. Centring puts the group where the eye already goes.
+ *
+ * The dot row keeps its height on a day with nothing on it, so the numbers
+ * across a week still sit on one line rather than bobbing up wherever a day is
+ * free. That reserved height is the clash mark's, the tallest thing the row
+ * can hold, so a day with a clash does not shift its number either.
+ */
 @Composable
 private fun MonthCell(
     date: LocalDate,
     inMonth: Boolean,
     isToday: Boolean,
     events: List<CalendarEvent>,
+    clash: Boolean,
     palette: CoursePalette,
     width: Dp,
     onOpen: () -> Unit,
@@ -205,6 +239,7 @@ private fun MonthCell(
     Column(
         modifier.clickable(onClick = onOpen).padding(vertical = Space.unit),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         // The same pill DayHeading puts round today's number, so the marker
         // means one thing wherever it turns up.
@@ -225,9 +260,11 @@ private fun MonthCell(
                 maxLines = 1,
             )
         }
-        if (events.isNotEmpty()) {
-            Spacer(Modifier.height(Space.unit))
-            DotRow(events, palette, width, dim = !inMonth)
+        Spacer(Modifier.height(Space.unit))
+        Box(Modifier.height(MARK), contentAlignment = Alignment.Center) {
+            if (events.isNotEmpty()) {
+                DotRow(events, palette, width, dim = !inMonth, clash = clash)
+            }
         }
     }
 }
@@ -245,6 +282,10 @@ private fun MonthCell(
  * the same problem a 3dp rail has, which is that it needs saturation to
  * register at all; the soft wash sits at the same lightness as the background
  * and disappears.
+ *
+ * A day where two courses genuinely collide leads with the clash mark. It is
+ * the one thing here worth more than a dot, and an icon says it where a colour
+ * cannot: every other colour in the row already means a course.
  */
 @Composable
 private fun DotRow(
@@ -252,9 +293,12 @@ private fun DotRow(
     palette: CoursePalette,
     width: Dp,
     dim: Boolean,
+    clash: Boolean,
 ) {
     val c = skema
-    val room = width - Space.unit * 2
+    // The mark takes its slot out of the row before the dots are counted, so
+    // it displaces a dot rather than pushing one off the edge.
+    val room = width - Space.unit * 2 - (if (clash) MARK + DOT_GAP else 0.dp)
     val slot = DOT + DOT_GAP
 
     // How many dots the cell can actually hold, and how many it can hold once
@@ -269,6 +313,14 @@ private fun DotRow(
         horizontalArrangement = Arrangement.spacedBy(DOT_GAP),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (clash) {
+            Glyph(
+                Ico.Clash,
+                tint = if (dim) c.accentStrong.copy(alpha = 0.4f) else c.accentStrong,
+                size = MARK,
+                description = "Clashing events",
+            )
+        }
         events.take(count).forEach { event ->
             val rail = palette.tint(event.courseCode).rail
             Box(

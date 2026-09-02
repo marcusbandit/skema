@@ -39,7 +39,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dk.bandit.skema.data.ViewMode
 import dk.bandit.skema.ics.CalendarEvent
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.daysUntil
 
@@ -83,6 +85,38 @@ private val MAX_COLUMN = 560.dp
 /** Air between two lanes of the same cluster, so overlapping blocks do not weld. */
 private val LANE_GAP = 3.dp
 
+/** One line of [Type.small] with its default leading. Counts lines, sizes nothing. */
+private val LINE = 18.dp
+
+/** Matches the week block's vertical padding, so the two agree on where text starts. */
+private val BLOCK_PAD = 3.dp
+
+/**
+ * How far a stacked block is pushed down per event sharing its exact start
+ * minute: one padded line, which is the row the block underneath has to keep
+ * clear for its own header to be readable.
+ */
+private val CASCADE_HEADER = LINE + BLOCK_PAD
+
+/**
+ * The share of the column a whole cascade may spend on its insets.
+ *
+ * The step per event is this budget divided by the depth of the cluster, so a
+ * two deep overlap indents boldly and a five deep one indents in small steps
+ * instead of pushing the last block off the right edge. A third leaves two
+ * thirds of the width on the deepest block, which still holds a title.
+ */
+private const val CASCADE_SHARE = 0.34f
+
+/**
+ * How long an anchored zoom will wait for the grid to be measured at its new
+ * hour height before it gives up and scrolls anyway.
+ *
+ * A few frames. The wait normally ends on the first one; the bound is there so
+ * a rounding mismatch cannot leave the correction pending forever.
+ */
+private const val MEASURE_WAIT_MS = 120L
+
 @Composable
 fun DayView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Modifier) {
     val c = skema
@@ -120,6 +154,15 @@ fun DayView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Modi
         if (target in 0 until DAY_PAGES && target != state.currentPage) state.scrollToPage(target)
     }
 
+    // The pinch is handled here rather than on the page, and that placement is
+    // load bearing. This modifier sits outside both scrollers, and pinchZoom
+    // reads the Initial pass, which travels parent to child: it therefore sees
+    // a two finger gesture before the pager's horizontal drag and before the
+    // page's vertical scroll, both of which read the Main pass on the way back
+    // up. Consuming there is what stops the swipe and the scroll from eating
+    // the pinch. One finger is never touched, so paging and scrolling still
+    // work. Everything under it is a plain clickable, which also resolves on
+    // Main, so a pinch that starts on top of an event block still zooms.
     HorizontalPager(
         state = state,
         key = { it },
@@ -129,11 +172,13 @@ fun DayView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Modi
                 model.zoomBy(factor)
                 // Read the zoom after applying it, the same way the week does:
                 // once it has clamped, the pinch is pushing against a wall and
-                // that is what builds the pressure that changes view.
+                // that is what builds the pressure that changes view. The two
+                // flags come from the model so the tolerance on "clamped" is
+                // decided in one place.
                 val step = pressure.feed(
                     factor = factor,
-                    atMin = model.hourHeight <= Grid.MIN_HOUR,
-                    atMax = model.hourHeight >= Grid.MAX_HOUR,
+                    atMin = model.atMinZoom,
+                    atMax = model.atMaxZoom,
                 )
                 // Nothing is narrower than a day, so +1 has nowhere to go.
                 if (step < 0) model.setView(ViewMode.Week)
@@ -165,29 +210,88 @@ private fun DayPage(
     val c = skema
     val density = LocalDensity.current
 
-    val window = remember(events) { DayWindow.of(events) }
+    // Midnight to midnight, whatever is on. The window used to be derived from
+    // the day's events, which put the same 13:00 at a different height on
+    // every day of the week; finding the part you care about is now the
+    // opening scroll's job and the zoom's job.
+    val window = DayWindow.FULL
     val timed = remember(events) { events.filterNot { it.allDay } }
     val allDay = remember(events) { events.filter { it.allDay } }
+
+    // Both arrangements, because which one is right depends on the column
+    // width, and the width is only known further down inside the grid.
     val placed = remember(timed) {
         Lanes.layout(timed, { it.startMinute() }, { it.endMinute() })
+    }
+    val cascaded = remember(timed) {
+        Lanes.cascade(timed, { it.startMinute() }, { it.endMinute() })
     }
 
     val scroll = rememberScrollState()
 
-    // Open on the first thing that happens. Landing at the top of the window
-    // means landing on an hour of empty grid, and the window already has an
-    // hour of air built into it. Once per day: a sync arriving later must not
-    // yank the scroll out from under a finger.
+    // Open on the interesting part of the day. A full day grid parked at its
+    // top is six hours of empty rules, so the scroll starts at the clock on
+    // today and at the first event on any other day, each backed off by an
+    // hour so the target is not welded to the top edge. Once per day: a sync
+    // arriving later must not yank the scroll out from under a finger.
     var landed by remember(date) { mutableStateOf(false) }
-    LaunchedEffect(date, placed) {
-        val first = placed.minOfOrNull { it.startMinute }
-        if (landed || first == null) return@LaunchedEffect
+    LaunchedEffect(date, events) {
+        if (landed) return@LaunchedEffect
         // maxValue is Int.MAX_VALUE until the grid has been measured, and a
         // scroll issued before then is clamped back to the top.
         snapshotFlow { scroll.maxValue }.first { it != Int.MAX_VALUE }
-        val y = window.offsetOf(first, hourHeight) - Space.medium
+        val y = window.offsetOf(openingMinute(date, events), hourHeight)
         scroll.scrollTo(with(density) { y.roundToPx() }.coerceAtLeast(0))
         landed = true
+    }
+
+    // The hour height the current scroll offset was measured against. It only
+    // moves once a correction has actually been applied, so a pinch that fires
+    // several times between frames accumulates its ratio instead of dropping
+    // the steps whose effects were cancelled.
+    var anchoredHour by remember { mutableStateOf(hourHeight) }
+    LaunchedEffect(hourHeight) {
+        val from = anchoredHour
+        val viewport = scroll.viewportSize
+        // A zoom that arrives before the day has landed, or before the grid
+        // has been measured at all, has nothing to correct: the opening scroll
+        // is about to place the day at the current hour height. The base
+        // follows the zoom so the next correction is not computed against a
+        // height the scroll offset never had.
+        if (!landed || viewport <= 0 || from <= 0f) {
+            anchoredHour = hourHeight
+            return@LaunchedEffect
+        }
+        if (from == hourHeight) return@LaunchedEffect
+
+        // Anchored zoom. Every y in the grid is linear in the hour height, so
+        // the pixel a minute is drawn at scales by the ratio of the two
+        // heights. Keeping the minute at the middle of the viewport where it
+        // was is then one line, since the scroller keeps its pixel offset and
+        // the content grew underneath it:
+        //   focus  = scroll + viewport / 2      the pixel between the fingers
+        //   scroll = focus * ratio - viewport / 2
+        // The centre stands in for the pinch centroid, which the gesture does
+        // not report; it is within half a viewport of the fingers, and it is
+        // the difference between the day sliding under the pinch and the day
+        // jumping by the whole change in height.
+        val ratio = hourHeight / from
+        val focus = scroll.value + viewport / 2f
+        val target = (focus * ratio - viewport / 2f).roundToInt().coerceAtLeast(0)
+
+        // scrollTo clamps against the height the grid was last measured at,
+        // and this runs before the frame that measures the new one, so zooming
+        // in near the end of the day would be cut short by the old maximum.
+        // For a zoom in the target always lands inside the new maximum, so
+        // waiting for the maximum to reach it ends on the next frame; a zoom
+        // out never exceeds the old maximum and never waits at all.
+        if (target > scroll.maxValue) {
+            withTimeoutOrNull(MEASURE_WAIT_MS) {
+                snapshotFlow { scroll.maxValue }.first { it >= target }
+            }
+        }
+        scroll.scrollTo(target)
+        anchoredHour = hourHeight
     }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -198,12 +302,15 @@ private fun DayPage(
             }
             Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll)) {
                 Row(Modifier.fillMaxWidth()) {
+                    // Labels thin out on their own as the hour shrinks, so 24
+                    // hours at the minimum zoom is not a wall of numbers.
                     HourGutter(window, hourHeight)
                     DayGrid(
                         date = date,
                         window = window,
                         hourHeight = hourHeight,
                         placed = placed,
+                        cascaded = cascaded,
                         palette = palette,
                         conflicts = conflicts,
                         onPick = onPick,
@@ -216,12 +323,34 @@ private fun DayPage(
     }
 }
 
+/**
+ * Where the day parks when it first appears.
+ *
+ * Today opens on the clock, because a day you are standing in is a question
+ * about now. Any other day opens on its first event. Both back off by the hour
+ * [DayWindow.openingMinute] already backs off by, so the two land the same way.
+ */
+private fun openingMinute(date: LocalDate, events: List<CalendarEvent>): Int =
+    if (date == today()) (nowMinutes() - 60).coerceIn(0, 23 * 60)
+    else DayWindow.openingMinute(events)
+
+/**
+ * The column itself: the rules, the blocks, the now line.
+ *
+ * Overlapping events are drawn side by side while the lanes still hold words,
+ * which on a day column is nearly always. The fallback is the week's cascade
+ * rather than a third arrangement of this view's own, so a folded phone reads
+ * the same way in both views. The test is [sideBySideFits], on the widest
+ * cluster of the day: mixing the two arrangements inside one column would be
+ * worse than either, so the deepest overlap decides for all of them.
+ */
 @Composable
 private fun DayGrid(
     date: LocalDate,
     window: DayWindow,
     hourHeight: Float,
     placed: List<Placed<CalendarEvent>>,
+    cascaded: List<Stacked<CalendarEvent>>,
     palette: CoursePalette,
     conflicts: Set<Long>,
     onPick: (CalendarEvent) -> Unit,
@@ -238,23 +367,61 @@ private fun DayGrid(
         val column = maxWidth
         HourRules(window, hourHeight)
 
-        placed.forEach { p ->
-            val event = p.item
-            val span = window.spanOf(p.startMinute, p.endMinute, hourHeight)
-            DayEventBlock(
-                event = event,
-                tint = palette.tint(event.courseCode),
-                height = span,
-                conflict = event.startEpochSeconds in conflicts,
-                modifier = Modifier
-                    .offset(
-                        x = column * p.offsetFraction,
-                        y = window.offsetOf(p.startMinute, hourHeight),
-                    )
-                    .width((column * p.widthFraction - LANE_GAP).coerceAtLeast(LANE_GAP))
-                    .height(span)
-                    .clickable { onPick(event) },
-            )
+        // The busiest moment of the day decides for the whole column.
+        val lanes = placed.maxOfOrNull { it.lanes } ?: 1
+        if (sideBySideFits(column, lanes)) {
+            placed.forEach { p ->
+                val event = p.item
+                val span = window.spanOf(p.startMinute, p.endMinute, hourHeight)
+                DayEventBlock(
+                    event = event,
+                    tint = palette.tint(event.courseCode),
+                    height = span,
+                    conflict = event.startEpochSeconds in conflicts,
+                    modifier = Modifier
+                        .offset(
+                            x = column * p.offsetFraction,
+                            y = window.offsetOf(p.startMinute, hourHeight),
+                        )
+                        .width((column * p.widthFraction - LANE_GAP).coerceAtLeast(LANE_GAP))
+                        .height(span)
+                        .clickable { onPick(event) },
+                )
+            }
+        } else {
+            // One step for the whole day, from the deepest stack in it, so
+            // every cascade on the page indents by the same amount instead of
+            // each one inventing its own. It is the stack depth and not the
+            // lane count that sets it: a chain of events each overlapping the
+            // next needs only two lanes and can still be six deep, and it is
+            // the sixth block that would otherwise land off the right edge.
+            val steps = cascaded.maxOfOrNull { it.depth } ?: 0
+            val step = if (steps > 0) column * CASCADE_SHARE / steps else 0.dp
+            cascaded.forEach { s ->
+                val event = s.item
+                val inset = step * s.depth
+                // Events starting in the same minute would hide each other's
+                // first line exactly, so each one after the first drops by a
+                // header. The height gives the same amount back, or the block
+                // would claim to run past its own end time.
+                val shift = CASCADE_HEADER * s.headerSteps
+                val span = window.spanOf(s.startMinute, s.endMinute, hourHeight)
+                val height = (span - shift).coerceAtLeast(CASCADE_HEADER)
+                DayEventBlock(
+                    event = event,
+                    tint = palette.tint(event.courseCode),
+                    height = height,
+                    conflict = event.startEpochSeconds in conflicts,
+                    modifier = Modifier
+                        .offset(
+                            x = inset,
+                            y = window.offsetOf(s.startMinute, hourHeight) + shift,
+                        )
+                        .width((column - inset - LANE_GAP).coerceAtLeast(LANE_GAP))
+                        .height(height)
+                        .clickable { onPick(event) },
+                )
+            }
         }
 
         // Last, so it crosses the blocks it is telling you about.
@@ -303,12 +470,6 @@ private fun AllDayStrip(
         }
     }
 }
-
-/** One line of [Type.small] with its default leading. Counts lines, sizes nothing. */
-private val LINE = 18.dp
-
-/** Matches the week block's vertical padding, so the two agree on where text starts. */
-private val BLOCK_PAD = 3.dp
 
 /**
  * A row of text inside a block, and how badly it wants to survive.

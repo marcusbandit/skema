@@ -27,8 +27,6 @@ data class SkemaSettings(
     val theme: ThemeChoice = ThemeChoice.System,
     /** DTU lists most classes twice. Merge each pair into one entry. */
     val collapseDuplicates: Boolean = true,
-    /** Pull the feed whenever the app comes to the front. */
-    val refreshOnOpen: Boolean = true,
 
     /** Week is the default because it is the view the timetable is actually read in. */
     val view: ViewMode = ViewMode.Week,
@@ -42,6 +40,18 @@ data class SkemaSettings(
 
     /** Saturday and Sunday are empty in a university timetable most weeks. */
     val showWeekend: Boolean = false,
+
+    /**
+     * The day you started here, as an ISO date, or null for "show everything".
+     *
+     * DTU's feed is not a record of your degree, it is a record of the
+     * university: this one goes back to 2019 and 98 of its 712 entries predate
+     * the owner ever enrolling. Those are not old courses of theirs, they are
+     * somebody else's timetable leaking through a shared org unit, and they
+     * make the month view and the course colours both worse. Anything before
+     * this date is dropped on the way out of the parser.
+     */
+    val enrolledFrom: String? = null,
 
     /**
      * Course code to a pinned hue in degrees. Empty means every course takes

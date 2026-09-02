@@ -20,3 +20,4 @@ expect fun vault(): Vault
 const val FEED_FILE = "feed.ics"
 const val META_FILE = "feed.meta.json"
 const val SETTINGS_FILE = "settings.json"
+const val SESSION_FILE = "session.json"

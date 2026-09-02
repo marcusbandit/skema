@@ -16,6 +16,10 @@ private val MONTHS = listOf(
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 )
+private val MONTH_NAMES = listOf(
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
 
 @OptIn(ExperimentalTime::class)
 fun today(): LocalDate =
@@ -27,6 +31,17 @@ fun nowSeconds(): Long = Clock.System.now().epochSeconds
 fun weekdayShort(d: DayOfWeek): String = WEEKDAYS[d.ordinal]
 
 fun monthShort(m: Month): String = MONTHS[m.ordinal]
+
+/**
+ * The month, spelled out.
+ *
+ * Abbreviating is a habit from column headers, and it leaked into places with
+ * room to spare: a title bar saying "Jun" when "June" fits reads as a machine
+ * saving three characters nobody asked it to save. Short names stay only
+ * where the space is genuinely fixed, which in this app is nothing: even a
+ * folded phone's title bar holds "September".
+ */
+fun monthLong(m: Month): String = MONTH_NAMES[m.ordinal]
 
 private fun pad(n: Int): String = if (n < 10) "0$n" else n.toString()
 

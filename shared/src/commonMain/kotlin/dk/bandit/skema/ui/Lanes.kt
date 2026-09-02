@@ -1,5 +1,8 @@
 package dk.bandit.skema.ui
 
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
 /**
  * Where overlapping events sit next to each other in a time column.
  *
@@ -14,6 +17,44 @@ package dk.bandit.skema.ui
  * with lane / lanes, so the same maths works for a 411dp folded column and an
  * 841dp unfolded one.
  */
+/**
+ * An event drawn stacked rather than side by side.
+ *
+ * Splitting a column between overlapping events is the textbook answer and it
+ * fails on a folded phone: a 73dp day column split two ways leaves 36dp, which
+ * holds no words at all, so two events become two anonymous stripes. Stacking
+ * trades a little truth about width for the thing that actually matters, which
+ * is that you can read what both of them are.
+ *
+ * Each event keeps nearly the full column and is inset from the left by its
+ * depth, so every one below shows a margin and its coloured rail. They are
+ * drawn in start order with the later on top, so the earlier event's header
+ * sits in the clear above the later one's top edge. The only case that breaks
+ * is two events starting in the same minute, where the upper one would cover
+ * the lower one's header exactly; [headerSteps] counts those and the view
+ * pushes the top down by that many header heights so both are legible.
+ */
+data class Stacked<T>(
+    val item: T,
+    /** How many events in this cluster start at or before it. Drives the inset. */
+    val depth: Int,
+    val cluster: Int,
+    val startMinute: Int,
+    val endMinute: Int,
+    /** Header heights to push the drawn top down by, to clear an identical start. */
+    val headerSteps: Int,
+)
+
+/**
+ * Whether a column is wide enough for the honest side by side layout.
+ *
+ * Below this the lanes stop holding words, so the view switches to stacking.
+ * Expressed as the width one lane needs, so the decision follows the zoom and
+ * the fold rather than being a device check.
+ */
+fun sideBySideFits(columnWidth: Dp, lanes: Int): Boolean =
+    lanes <= 1 || columnWidth / lanes >= 84.dp
+
 data class Placed<T>(
     val item: T,
     /** Which column within the cluster, 0 based. */
@@ -94,6 +135,49 @@ object Lanes {
         }
         flush()
 
+        return out
+    }
+
+    /**
+     * The stacking alternative to [layout], for columns too narrow to split.
+     *
+     * Clusters are found exactly as in [layout], so the two agree about what
+     * overlaps what; only the arrangement inside a cluster differs.
+     */
+    fun <T> cascade(
+        items: List<T>,
+        start: (T) -> Int,
+        end: (T) -> Int,
+    ): List<Stacked<T>> {
+        if (items.isEmpty()) return emptyList()
+
+        val sorted = items
+            .map { Triple(it, start(it), maxOf(end(it), start(it) + MIN_MINUTES)) }
+            .sortedWith(compareBy({ it.second }, { -(it.third - it.second) }))
+
+        val out = mutableListOf<Stacked<T>>()
+        var cluster = mutableListOf<Triple<T, Int, Int>>()
+        var clusterEnd = Int.MIN_VALUE
+
+        fun flush() {
+            if (cluster.isEmpty()) return
+            val n = cluster.size
+            cluster.forEachIndexed { i, (item, s, e) ->
+                // Only events sharing this one's exact start can hide its
+                // header, so that is what the shift counts, not the depth.
+                val sameStart = cluster.take(i).count { it.second == s }
+                out += Stacked(item, i, n, s, e, sameStart)
+            }
+            cluster = mutableListOf()
+            clusterEnd = Int.MIN_VALUE
+        }
+
+        for (row in sorted) {
+            if (row.second >= clusterEnd) flush()
+            cluster.add(row)
+            clusterEnd = maxOf(clusterEnd, row.third)
+        }
+        flush()
         return out
     }
 }
