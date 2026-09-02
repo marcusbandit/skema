@@ -24,6 +24,11 @@ calendar with the hamburger, the day disc and the three toolbar icons circled.
   guesses at what those controls should do here; the owner has not said.
 - The today marker in the day strip is a true circle, like the circled "21".
 
+### Theme
+- The status bar's clock and icons went white on the light app, because Android
+  coloured them from the phone's dark mode rather than the app's. They now
+  follow the theme the app resolved to. Done, both mismatches checked.
+
 ### Time grid
 - Show 07:00 to 18:00 by default. Anything on the schema outside that is
   shown, and the grid for that day or week grows to hold it. Done. The week

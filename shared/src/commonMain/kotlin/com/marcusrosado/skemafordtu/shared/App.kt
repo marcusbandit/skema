@@ -19,6 +19,7 @@ import com.marcusrosado.skemafordtu.ui.SemesterView
 import com.marcusrosado.skemafordtu.ui.SettingsScreen
 import com.marcusrosado.skemafordtu.ui.SkemaModel
 import com.marcusrosado.skemafordtu.ui.SkemaTheme
+import com.marcusrosado.skemafordtu.ui.SystemBars
 import com.marcusrosado.skemafordtu.ui.skema
 
 /**
@@ -73,6 +74,9 @@ fun App() {
     }
 
     SkemaTheme(dark) {
+        // The bars' icons follow the theme resolved above, not the phone's
+        // setting. The two differ whenever the theme is chosen by hand.
+        SystemBars(dark)
         // Android draws edge to edge from API 35 whether you ask for it or
         // not, so the whole app keeps out of the status and gesture bars.
         Box(Modifier.fillMaxSize().background(skema.background).safeDrawingPadding()) {

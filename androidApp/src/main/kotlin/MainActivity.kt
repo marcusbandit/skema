@@ -13,6 +13,8 @@ class MainActivity : ComponentActivity() {
         // Storage lives in common code, which cannot see a Context. This is
         // the one place Android has to hand one over.
         SkemaAndroid.init(applicationContext)
+        // The first, default call. The app makes it again with its own theme
+        // once that is known; see SystemBars in the shared module.
         enableEdgeToEdge()
         setContent { App() }
     }

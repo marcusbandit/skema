@@ -17,8 +17,8 @@ android {
         // the same app and an install was a silent no-op unless it happened to
         // replace the file. versionName is what the owner reads; versionCode
         // is the only number Android compares.
-        versionCode = 5
-        versionName = "0.5.0"
+        versionCode = 6
+        versionName = "0.5.1"
     }
 }
 
