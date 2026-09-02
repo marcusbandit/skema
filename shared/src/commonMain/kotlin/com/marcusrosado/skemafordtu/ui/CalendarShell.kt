@@ -1,17 +1,20 @@
 package com.marcusrosado.skemafordtu.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -37,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,15 +52,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
@@ -68,9 +72,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
-import kotlin.math.abs
-import kotlin.math.min
-import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.minutes
 
 /**
@@ -134,8 +135,15 @@ internal object Motion {
  */
 private val SYNC_EVERY = 5.minutes
 
-/** The sheet's resting share of the frame when it is not expanded. */
+/** The most of the frame the detail pane may take. A shorter entry takes less. */
 private const val PARTIAL = 0.5f
+
+/**
+ * How much of its own height the detail pane has to be pulled down before
+ * letting go dismisses it. A share, so the gesture is the same for a three
+ * line entry and a half screen one.
+ */
+private const val DISMISS_SHARE = 0.3f
 
 /**
  * A release still moving faster than this counts as a throw, and the
@@ -351,14 +359,14 @@ private fun SinglePane(
     onMenu: (() -> Unit)?,
     onTune: () -> Unit,
 ) {
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            TopBar(model, onJump, onMenu, onTune)
-            Calendar(model, palette, Modifier.weight(1f))
-        }
-        // Always composed, never conditional: a sheet that is removed from
+    Column(Modifier.fillMaxSize()) {
+        TopBar(model, onJump, onMenu, onTune)
+        // The calendar takes what the pane leaves. The pane animates its
+        // height, so the grid resizes with it rather than being covered.
+        Calendar(model, palette, Modifier.weight(1f))
+        // Always composed, never conditional: a pane that is removed from
         // the tree the instant it is dismissed has nothing left to animate.
-        DetailSheet(model, palette)
+        DetailPane(model, palette)
     }
 }
 
@@ -608,287 +616,160 @@ private fun MenuRow(label: String, ico: Ico, enabled: Boolean = true, onClick: (
     }
 }
 
-/** Where the detail sheet is allowed to come to rest, top to bottom. */
-private enum class Stop { Full, Partial, Gone }
-
 /**
- * The detail on a narrow frame.
+ * The detail on a narrow frame: a pane under the calendar, not a sheet over it.
  *
- * Three resting places and nothing in between: the whole frame, about half of
- * it, and gone. A drag moves the panel continuously, and a release always
- * lands on one of the three, animated. The old rule only settled the panel
- * when something flung it, so a slow drag over the text let go of a sheet
- * standing halfway up the screen and left it there.
+ * It used to be a sheet that rose from the bottom edge and covered the grid,
+ * with three resting places and a scrim. The month view puts the day under
+ * its grid as a second pane, and the week should read the same way: tap a
+ * class and the grid gives up the lower part of the screen to it, the way a
+ * split pane does, and takes it back when the detail goes. The pane is as
+ * tall as its content up to half the frame, so a short entry takes a short
+ * pane and a long one scrolls inside the half.
  *
- * There is no close button and no fullscreen button. Up is bigger, down is
- * gone, and every way out of this panel is the same downward slide: a drag, a
- * tap on the calendar behind it, the back gesture, and picking a different
- * event all set the same target and the panel travels there from wherever it
- * happens to be. Nothing here is ever removed from the tree without moving
- * first, which is what a sheet vanishing on the spot used to be.
- *
- * Deliberately not a ModalBottomSheet: that one brings Material's corner
- * shape, its scrim and its drag handle, and all three are somebody else's app.
- *
- * The geometry is one full height panel pushed down by `offset`, not a panel
- * whose height changes. The content is anchored to the panel's top edge, so at
- * the partial stop the rest of the panel is below the screen and expanding
- * reveals it by moving one thing, which is also the one thing a finger drags.
+ * Nothing here is ever removed from the tree without moving first. The pane
+ * grows up from the bottom edge as it arrives and shrinks back into it as it
+ * leaves, on the sheet's old timings, and the grid above resizes with it.
+ * Two ways out, neither a button: pull the pane down past a third of its
+ * height or flick it, or press back. Picking another class swaps the content
+ * in place with a fade.
  */
 @Composable
-private fun DetailSheet(model: SkemaModel, palette: CoursePalette) {
+private fun DetailPane(model: SkemaModel, palette: CoursePalette) {
     val c = skema
     val picked = model.picked
+    val reduced = reducedMotion()
+    val frame = LocalFrame.current
+    val scope = rememberCoroutineScope()
+    val flickPx = with(LocalDensity.current) { FLICK.toPx() }
 
-    // Back closes the sheet before the drawer or the screen under it, and is
+    // Back closes the pane before the drawer or the screen under it, and is
     // disabled the moment the model lets go, so the rest of the way out is an
     // animation rather than another thing back has to be pressed through.
     BackHandler(enabled = picked != null) { model.picked = null }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val density = LocalDensity.current
-        val framePx = with(density) { maxHeight.toPx() }
-        val flickPx = with(density) { FLICK.toPx() }
-        val scope = rememberCoroutineScope()
+    // Held past the dismissal so there is still something to draw while the
+    // pane shrinks away; model.picked is null the moment the exit starts.
+    var last by remember { mutableStateOf<CalendarEvent?>(null) }
+    LaunchedEffect(picked) { if (picked != null) last = picked }
+    val shown = picked ?: last
 
-        // Held past the dismissal so there is still something to draw on the
-        // way out. model.picked is null the moment the sheet starts leaving,
-        // and an exit animation over nothing is a blank rectangle sliding down.
-        var shown by remember { mutableStateOf<CalendarEvent?>(null) }
+    // How far a drag has pulled the pane down. Visual only: the layout does
+    // not change under a finger. The pane slides on a layer and either comes
+    // back or goes, and a new pick starts from rest.
+    val pulled = remember { Animatable(0f) }
+    var paneHeight by remember { mutableIntStateOf(0) }
+    LaunchedEffect(picked) { if (picked != null) pulled.snapTo(0f) }
 
-        // The panel's own content height, which is what lets the partial stop
-        // be the content rather than half a screen with a band of empty
-        // surface below it. Measured against the full height panel, so it is
-        // the true height whenever the detail is shorter than the frame.
-        var contentPx by remember { mutableStateOf(0) }
-        val restPx = if (contentPx > 0) min(framePx * PARTIAL, contentPx.toFloat()) else framePx * PARTIAL
+    /** Moves the pane as far as it will go, and reports the part used. */
+    fun take(dy: Float): Float {
+        val from = pulled.value
+        val to = (from + dy).coerceAtLeast(0f)
+        if (to != from) scope.launch { pulled.snapTo(to) }
+        return to - from
+    }
 
-        /** How far the panel's top edge sits below the top of the frame. */
-        fun positionOf(stop: Stop): Float = when (stop) {
-            Stop.Full -> 0f
-            Stop.Partial -> framePx - restPx
-            Stop.Gone -> framePx
+    /** A release: past the flick or past the share it goes, otherwise it comes back. */
+    fun settle(velocity: Float) {
+        val far = paneHeight > 0 && pulled.value > paneHeight * DISMISS_SHARE
+        if (velocity > flickPx || far) {
+            model.picked = null
+        } else {
+            scope.launch { pulled.animateTo(0f, Motion.settle) }
         }
+    }
 
-        var stop by remember { mutableStateOf(Stop.Gone) }
-        var dragging by remember { mutableStateOf(false) }
-        val offset = remember { Animatable(framePx) }
+    val takeNow by rememberUpdatedState({ dy: Float -> take(dy) })
+    val settleNow by rememberUpdatedState({ velocity: Float -> settle(velocity) })
 
-        // What the model wants, turned into a stop. Nothing here animates:
-        // this decides where the panel belongs and the effect below is the
-        // only thing that ever moves it.
-        //
-        // Keyed on the stop as well, so it is re-asked every time the target
-        // moves. That is what makes it converge from anywhere: a finger that
-        // catches a panel mid exit leaves the model and the panel disagreeing,
-        // and this settles the argument on the next pass rather than leaving
-        // the sheet holding an event nobody picked.
-        LaunchedEffect(picked, shown, stop) {
-            when {
-                picked == null -> if (shown != null) stop = Stop.Gone
-                shown == null -> {
-                    shown = picked
-                    stop = Stop.Partial
-                }
-                // A different event while the sheet is up: out through the
-                // bottom first, and the pass after this one brings the new one
-                // back up. Swapping the text under a stationary panel is the
-                // one exit this sheet is not allowed to have.
-                shown != picked -> stop = Stop.Gone
-                else -> Unit
+    // The detail scrolls inside the pane, so a drag over the text has two
+    // readings. Downward with the text at its top, the pane moves; upward
+    // while the pane is pulled, the pane comes back before the text scrolls.
+    // Without this the only draggable part would be the grab strip.
+    val nested = remember {
+        object : NestedScrollConnection {
+            private var moved = false
+
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y >= 0f) return Offset.Zero
+                val used = takeNow(available.y)
+                if (used != 0f) moved = true
+                return Offset(0f, used)
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (available.y <= 0f) return Offset.Zero
+                val used = takeNow(available.y)
+                if (used != 0f) moved = true
+                return Offset(0f, used)
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity = release(available)
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = release(available)
+
+            private fun release(available: Velocity): Velocity {
+                if (!moved) return Velocity.Zero
+                moved = false
+                settleNow(available.y)
+                return available
             }
         }
+    }
 
-        // The one place the panel moves on its own.
-        //
-        // Keyed on the drag, so a release settles even when it lands on the
-        // stop it started from; on the measured height, so a panel that turns
-        // out to be shorter than half the frame slides to its true resting
-        // place instead of jumping there; and on the frame, so a fold or a
-        // rotation re-seats it. A drag interrupts this by snapping the same
-        // Animatable, which cancels this coroutine, which is exactly right: an
-        // exit a finger caught halfway is no longer an exit.
-        LaunchedEffect(stop, dragging, restPx, framePx) {
-            if (dragging) return@LaunchedEffect
-            val to = positionOf(stop)
-            if (offset.value != to) {
-                val spec: AnimationSpec<Float> = when {
-                    stop == Stop.Gone -> tween(Motion.SHEET_OUT, easing = Motion.leave)
-                    // Coming up from off the bottom edge is an arrival and
-                    // worth the longer curve; moving between two stops it can
-                    // already see is a settle.
-                    offset.value >= framePx -> tween(Motion.SHEET_IN, easing = Motion.arrive)
-                    else -> Motion.settle
-                }
-                offset.animateTo(to, spec)
-            }
-            // Only once the panel is all the way out does the event stop being
-            // drawn. Anything earlier is a disappearance.
-            if (stop == Stop.Gone) shown = null
-        }
-
-        /** Moves the panel as far as it will go, and reports the part used. */
-        fun take(dy: Float): Float {
-            val from = offset.value
-            val to = (from + dy).coerceIn(positionOf(Stop.Full), positionOf(Stop.Gone))
-            if (to != from) scope.launch { offset.snapTo(to) }
-            return to - from
-        }
-
-        /**
-         * Where a release lands. Velocity beats position past the flick
-         * threshold, so a throw goes where it was aimed however far the sheet
-         * had actually travelled; below it the nearest stop wins, which is
-         * also what makes a release with no movement in it stay put.
-         */
-        fun landing(velocity: Float): Stop = when {
-            velocity > flickPx -> Stop.Gone
-            velocity < -flickPx -> Stop.Full
-            else -> Stop.entries.minBy { abs(positionOf(it) - offset.value) }
-        }
-
-        fun settle(velocity: Float) {
-            // A panel the model has already let go of has one place left to
-            // be, whichever way the finger was going when it left the glass.
-            // Without this, catching a sheet on its way out and throwing it
-            // back up would leave it showing an event nothing has selected.
-            val next = if (model.picked == null) Stop.Gone else landing(velocity)
-            dragging = false
-            stop = next
-            // Dismissing by drag takes the same path as dismissing by back or
-            // by a tap outside: the model lets go, and the panel is already
-            // heading for the bottom edge by the time it hears about it.
-            if (next == Stop.Gone) model.picked = null
-        }
-
-        // The gesture code below outlives the composition that created it, so
-        // it reaches the current versions of these rather than the ones that
-        // were in scope when a finger first landed.
-        val takeNow by rememberUpdatedState({ dy: Float -> take(dy) })
-        val settleNow by rememberUpdatedState({ velocity: Float -> settle(velocity) })
-
-        val drag = rememberDraggableState { dy -> take(dy) }
-
-        // The detail scrolls inside the panel, so a drag over the text has two
-        // possible readings and something has to arbitrate. The rule is the
-        // one every sheet uses: upward, the sheet moves first and the text
-        // only scrolls once the sheet has nowhere left to go; downward, the
-        // text scrolls first and the sheet only moves once the text is back at
-        // its top.
-        //
-        // Without this the only draggable part of the sheet is the handle,
-        // because a scroller claims the gesture whether or not it has anywhere
-        // to scroll, and this detail usually has nowhere.
-        val nested = remember {
-            object : NestedScrollConnection {
-
-                /** Whether this gesture has actually moved the panel. */
-                private var moved = false
-
-                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                    if (available.y >= 0f) return Offset.Zero
-                    val used = takeNow(available.y)
-                    if (used != 0f) moved = true
-                    return Offset(0f, used)
-                }
-
-                override fun onPostScroll(
-                    consumed: Offset,
-                    available: Offset,
-                    source: NestedScrollSource,
-                ): Offset {
-                    if (available.y <= 0f) return Offset.Zero
-                    val used = takeNow(available.y)
-                    if (used != 0f) moved = true
-                    return Offset(0f, used)
-                }
-
-                override suspend fun onPreFling(available: Velocity): Velocity = release(available)
-
-                override suspend fun onPostFling(
-                    consumed: Velocity,
-                    available: Velocity,
-                ): Velocity = release(available)
-
-                /**
-                 * The end of any gesture that moved the panel settles it, with
-                 * or without a fling behind it. Waiting for a fling was the
-                 * bug: a slow drag over the text ends with a velocity of
-                 * nearly nothing, and the sheet was left standing between two
-                 * stops until something else touched it.
-                 */
-                private fun release(available: Velocity): Velocity {
-                    if (!moved) return Velocity.Zero
-                    moved = false
-                    settleNow(available.y)
-                    return available
-                }
-            }
-        }
-
-        val ink = c.ink
-        if (shown != null) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .drawBehind {
-                        // Barely there at the partial stop, still gentle at
-                        // full screen. A flat 0.32 read as the calendar being
-                        // switched off; this only says which of the two layers
-                        // is in front. Read in the draw phase, so a drag
-                        // repaints one rectangle instead of recomposing, and
-                        // it reaches zero on its own as the panel leaves.
-                        val openness = ((framePx - offset.value) / framePx).coerceIn(0f, 1f)
-                        drawRect(ink, alpha = SCRIM_MAX * openness)
-                    }
-                    .clickable(onClick = { model.picked = null }),
-            )
-        }
-
+    AnimatedVisibility(
+        visible = picked != null,
+        enter = if (reduced) {
+            fadeIn(tween(Motion.FADE))
+        } else {
+            expandVertically(tween(Motion.SHEET_IN, easing = Motion.arrive), expandFrom = Alignment.Top) +
+                fadeIn(tween(Motion.SHEET_FADE))
+        },
+        exit = if (reduced) {
+            fadeOut(tween(Motion.FADE))
+        } else {
+            shrinkVertically(tween(Motion.SHEET_OUT, easing = Motion.leave), shrinkTowards = Alignment.Top) +
+                fadeOut(tween(Motion.SHEET_FADE))
+        },
+        label = "detail",
+    ) {
+        val event = shown ?: return@AnimatedVisibility
         Column(
             Modifier
-                .fillMaxSize()
-                .offset { IntOffset(0, offset.value.roundToInt()) }
+                .fillMaxWidth()
+                .heightIn(max = frame.height * PARTIAL)
+                .padding(horizontal = Space.small)
+                .padding(bottom = Space.small)
+                .graphicsLayer { translationY = pulled.value }
+                .onSizeChanged { paneHeight = it.height }
                 .clip(SquircleShape(Radius.sheet))
                 .background(c.surface)
                 .nestedScroll(nested)
                 .draggable(
-                    state = drag,
+                    state = rememberDraggableState { dy -> take(dy) },
                     orientation = Orientation.Vertical,
-                    onDragStarted = { dragging = true },
                     onDragStopped = { velocity -> settle(velocity) },
                 ),
         ) {
-            val event = shown
-            // Everything the panel actually contains, measured as one piece:
-            // this height is what the partial stop is capped to. Only reported
-            // while there is an event, so an empty panel on its way out does
-            // not tell the next one it is four pixels tall.
-            Column(Modifier.onSizeChanged { if (event != null) contentPx = it.height }) {
-                // The grab strip. A whole row rather than the bar itself,
-                // because the bar is 4dp tall and a thumb is not. It is the
-                // only thing left saying this panel is draggable, now that the
-                // two buttons that said it in words are gone.
+            // The grab strip: the mark that says the pane moves, the same one
+            // every panel in the app wears.
+            Box(
+                Modifier.fillMaxWidth().padding(vertical = Space.medium),
+                contentAlignment = Alignment.Center,
+            ) {
                 Box(
                     Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = Space.medium),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        Modifier
-                            .width(Space.large + Space.medium)
-                            .height(Space.unit)
-                            .background(c.hairline, pillShape()),
-                    )
-                }
-                if (event != null) {
-                    EventDetail(
-                        event = event,
-                        tint = palette.tint(event.courseCode),
-                        conflict = event.startEpochSeconds in model.conflicts,
-                    )
-                }
+                        .width(Space.large + Space.medium)
+                        .height(Space.unit)
+                        .background(c.hairline, pillShape()),
+                )
+            }
+            Crossfade(targetState = event, animationSpec = tween(Motion.FADE), label = "picked") { e ->
+                EventDetail(
+                    event = e,
+                    tint = palette.tint(e.courseCode),
+                    conflict = e.startEpochSeconds in model.conflicts,
+                )
             }
         }
     }

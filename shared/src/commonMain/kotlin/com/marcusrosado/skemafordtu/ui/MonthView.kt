@@ -1,5 +1,9 @@
 package com.marcusrosado.skemafordtu.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -147,6 +151,9 @@ fun MonthView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Mo
             conflicts = conflicts,
             palette = palette,
             selected = model.selected,
+            // While a class is picked the shell's detail pane has the lower
+            // half, so the day list steps aside rather than being squeezed.
+            showDay = model.picked == null,
             onPick = { date ->
                 // The first tap on a day is a question, answered under the
                 // grid. A second tap on the same day is the way into it: the
@@ -165,6 +172,7 @@ private fun MonthPage(
     conflicts: Set<Long>,
     palette: CoursePalette,
     selected: LocalDate,
+    showDay: Boolean,
     onPick: (LocalDate) -> Unit,
     onEvent: (CalendarEvent) -> Unit,
 ) {
@@ -229,18 +237,27 @@ private fun MonthPage(
         if (aside) return@Column
 
         // The day itself, in whatever height the grid left. It scrolls on its
-        // own, so a day with nine things on it never pushes the grid up.
-        DayTimeline(
-            date = selected,
-            events = byDay[selected].orEmpty(),
-            palette = palette,
-            onPick = onEvent,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(top = Space.medium, bottom = Space.medium),
-        )
+        // own, so a day with nine things on it never pushes the grid up. It
+        // leaves the way the detail pane arrives, folding into the grid's
+        // bottom edge, so the swap reads as one pane giving way to another.
+        AnimatedVisibility(
+            visible = showDay,
+            modifier = Modifier.weight(1f, fill = false),
+            enter = expandVertically(tween(Motion.SHEET_IN, easing = Motion.arrive), expandFrom = Alignment.Top),
+            exit = shrinkVertically(tween(Motion.SHEET_OUT, easing = Motion.leave), shrinkTowards = Alignment.Top),
+            label = "day",
+        ) {
+            DayTimeline(
+                date = selected,
+                events = byDay[selected].orEmpty(),
+                palette = palette,
+                onPick = onEvent,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = Space.medium, bottom = Space.medium),
+            )
+        }
     }
 }
 

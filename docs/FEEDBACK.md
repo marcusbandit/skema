@@ -41,6 +41,11 @@ calendar with the hamburger, the day disc and the three toolbar icons circled.
   two, should look controlled. Done: it is a hollow ring on the line, one
   time, no lane, no fork, and it does not recolour the line.
 
+### Detail
+- On the week view a tapped class should not raise a sheet from the bottom.
+  Split the pane the way the month view does: grid above, detail below.
+  Done for every narrow view; the month's day list steps aside for it.
+
 ### Theme
 - The status bar's clock and icons went white on the light app, because Android
   coloured them from the phone's dark mode rather than the app's. They now
