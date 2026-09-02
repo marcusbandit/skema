@@ -5,6 +5,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -20,7 +21,6 @@ import com.marcusrosado.skemafordtu.ui.SettingsScreen
 import com.marcusrosado.skemafordtu.ui.SkemaModel
 import com.marcusrosado.skemafordtu.ui.SkemaTheme
 import com.marcusrosado.skemafordtu.ui.SystemBars
-import com.marcusrosado.skemafordtu.ui.skema
 
 /**
  * The whole app. The activity calls this and nothing else.
@@ -78,12 +78,15 @@ fun App() {
         // setting. The two differ whenever the theme is chosen by hand.
         SystemBars(dark)
         // Android draws edge to edge from API 35 whether you ask for it or
-        // not, so the whole app keeps out of the status and gesture bars.
-        Box(Modifier.fillMaxSize().background(skema.background).safeDrawingPadding()) {
+        // not. The calendar's scaffold keeps its content out of the bars
+        // itself and lets its own bars and drawer run under them; the two
+        // screens that still draw their own chrome keep out of the bars
+        // the old way until they get a scaffold of their own.
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             when (model.screen) {
                 Screen.Calendar -> CalendarShell(model, palette)
-                Screen.Semesters -> SemesterView(model, palette)
-                Screen.Settings -> SettingsScreen(model)
+                Screen.Semesters -> Box(Modifier.safeDrawingPadding()) { SemesterView(model, palette) }
+                Screen.Settings -> Box(Modifier.safeDrawingPadding()) { SettingsScreen(model) }
             }
         }
     }

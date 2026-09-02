@@ -3,9 +3,16 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      enableOnBackInvokedCallback is what makes back predictive: the drawer
+      and the sheets follow the gesture out instead of vanishing when it
+      completes. Every back handler in the app is registered through the
+      activity's dispatcher, which is what the flag needs.
+    -->
     <application
         android:label="Skema"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true">
 
         <!--
           configChanges is what makes folding seamless rather than a blink.

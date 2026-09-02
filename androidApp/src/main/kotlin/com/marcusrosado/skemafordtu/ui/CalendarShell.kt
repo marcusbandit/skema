@@ -1,5 +1,6 @@
 package com.marcusrosado.skemafordtu.ui
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -9,40 +10,54 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,8 +77,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import com.marcusrosado.skemafordtu.data.ViewMode
 import com.marcusrosado.skemafordtu.ics.CalendarEvent
 import com.marcusrosado.skemafordtu.ics.Season
@@ -159,20 +172,27 @@ internal val FLICK = 400.dp
  * decides how the screen is divided.
  *
  * Two branches on size in the whole app and both are here. The first spends
- * width on the sidebar: wide enough and it is a strip that is always there,
- * otherwise the same strip parked off the left edge until it is pulled in.
- * The second spends what is left on panes. Both read the same model, so unfolding
- * the phone moves the detail from a sheet into a rail and the menu from a
- * drawer into a strip, and changes nothing else: same day, same zoom, same
- * selection, no reload. That is what makes the fold seamless rather than a
- * restart.
+ * width on the sidebar: on a compact window it is Material's modal drawer,
+ * off screen until the menu control or an edge swipe pulls it in; on
+ * anything wider it is a rail that is always there. The second spends what
+ * is left on panes. Both read the same model, so unfolding the phone moves
+ * the detail from a pane under the grid into a rail beside it and the menu
+ * from a drawer into a rail, and changes nothing else: same day, same zoom,
+ * same selection, no reload. That is what makes the fold seamless rather
+ * than a restart.
+ *
+ * The width question is put to the window size class, Material's own break
+ * points, and the panes then measure themselves inside whatever the scaffold
+ * and the rail leave, so a day column can never be sized for a width it does
+ * not have.
  */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3WindowSizeClassApi::class)
 @Composable
 fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
     // Syncing is not a button any more. An app that knows its data has a
     // shelf life should not make you press refresh to find out; it fetches
-    // when it opens and then on a timer, and the status line under the
-    // headline is where you see that it happened.
+    // when it opens and then on a timer, and the bar under the headline is
+    // where you see that it is happening.
     LaunchedEffect(model.hasUrl) {
         while (model.hasUrl) {
             // busy means either the settings screen's own "Sync now" or the
@@ -183,86 +203,103 @@ fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
         }
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val window = Frame(maxWidth, maxHeight)
+    // No activity means a preview or a test host, and those get the drawer.
+    val activity = LocalActivity.current
+    val railed = activity != null &&
+        calculateWindowSizeClass(activity).widthSizeClass != WindowWidthSizeClass.Compact
 
-        // A rail is width the calendar never gets back, so everything after
-        // this measures itself against the frame MINUS the rail. Deciding two
-        // panes on the window and then drawing them into less than the window
-        // is exactly how a day column ends up off the edge.
-        val railed = window.width >= RAIL_FROM
-        val frame = if (railed) window.copy(width = window.width - RAIL_WIDTH) else window
+    // Whether the month picker is up. It lives here rather than in the top
+    // bar because it covers the whole frame, and on a two pane screen the
+    // top bar is a third of it.
+    var jumping by remember { mutableStateOf(false) }
 
-        // Whether the month picker is up. It lives here rather than in the top
-        // bar because it covers the whole frame, and on a two pane screen the
-        // top bar is a third of it.
-        var jumping by remember { mutableStateOf(false) }
+    // Whether the calendar's settings sheet is up. Same place and same
+    // reason as the picker: it covers the frame, not the top bar.
+    var tuning by remember { mutableStateOf(false) }
 
-        // Whether the calendar's settings sheet is up. Same place and same
-        // reason as the picker: it covers the frame, not the top bar.
-        var tuning by remember { mutableStateOf(false) }
+    // The drawer is the narrow presentation of the same sidebar. Growing
+    // into a rail closes it, so folding back never reveals a menu left
+    // open in a posture that had no menu to open.
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(railed) { if (railed && drawer.isOpen) drawer.close() }
 
-        // The drawer is the narrow presentation of the same sidebar. Growing
-        // into a rail closes it, so folding back never reveals a menu left
-        // open in a posture that had no menu to open.
-        var menuOpen by remember { mutableStateOf(false) }
-        LaunchedEffect(railed) { if (railed) menuOpen = false }
+    // "Nothing moved, 736 entries" is worth saying once and then not worth a
+    // permanent line of the screen; a failure has to be acknowledged. Both
+    // are what a snackbar is for: the first goes by itself, the second waits
+    // for its dismiss. Fetching is not a message but a bar under the top
+    // bar, so it is skipped here.
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(model.status, model.failed, model.busy) {
+        if (model.busy || model.status.isBlank()) return@LaunchedEffect
+        snackbar.showSnackbar(
+            message = model.status,
+            withDismissAction = model.failed,
+            duration = if (model.failed) SnackbarDuration.Indefinite else SnackbarDuration.Short,
+        )
+        model.clearStatus()
+    }
 
-        CompositionLocalProvider(LocalFrame provides frame) {
-            if (railed) {
-                // The strip is always there, so it is simply a column of the
-                // layout and there is nothing to open.
-                Row(Modifier.fillMaxSize()) {
-                    SidebarRail(model, Modifier.width(RAIL_WIDTH).fillMaxHeight())
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                        Panes(
-                            model, palette, frame,
-                            onJump = { jumping = true },
-                            onMenu = null,
-                            onTune = { tuning = true },
-                        )
-                    }
+    val body: @Composable (onMenu: (() -> Unit)?) -> Unit = { onMenu ->
+        Scaffold(
+            topBar = {
+                Column {
+                    TopBar(model, onJump = { jumping = true }, onMenu = onMenu, onTune = { tuning = true })
+                    // The one place a sync is visible while it runs.
+                    if (model.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-            } else {
-                // The same strip, off to the left until it is pulled in. It
-                // pushes the calendar rather than covering it, so the frame
-                // the calendar measured itself against never changes.
-                SidebarScaffold(model, open = menuOpen, onOpenChange = { menuOpen = it }) {
-                    Panes(
-                        model, palette, frame,
-                        onJump = { jumping = true },
-                        onMenu = { menuOpen = true },
-                        onTune = { tuning = true },
-                    )
+            },
+            snackbarHost = { SnackbarHost(snackbar) },
+        ) { padding ->
+            // Measured inside the scaffold, so the frame the panes divide is
+            // what is actually left under the bar and beside the rail.
+            // Deciding two panes on the window and then drawing them into
+            // less than the window is exactly how a day column ends up off
+            // the edge.
+            BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+                val frame = Frame(maxWidth, maxHeight)
+                CompositionLocalProvider(LocalFrame provides frame) {
+                    Panes(model, palette, frame)
                 }
             }
         }
+    }
 
-        // No back handler for the picker here on purpose. The panel wires up
-        // its own, which registers later and therefore wins, and which goes
-        // out through the panel's exit animation. One here would only ever
-        // fire while that exit is already running, and all it could do is drop
-        // the panel mid slide, which is the exact jank the animation exists to
-        // avoid.
+    if (railed) {
+        Row(Modifier.fillMaxSize()) {
+            SidebarRail(model, Modifier.fillMaxHeight())
+            Box(Modifier.weight(1f).fillMaxHeight()) { body(null) }
+        }
+    } else {
+        SidebarDrawer(model, drawer) {
+            body { scope.launch { drawer.open() } }
+        }
+    }
 
-        // Composed only while it is wanted. The panel plays its own way out
-        // before it calls back, which is why dismissing it is a callback and
-        // not this flag going false on the tap.
-        if (jumping) {
-            val years = jumpYears(model)
-            MonthYearSheet(
-                // The day view is anchored on the selected day rather than on
-                // the anchor, so the picker opens on the month you can see.
-                initial = if (model.view == ViewMode.Day) model.selected else model.anchor,
-                minYear = years.first,
-                maxYear = years.last,
-                onPick = { model.select(it) },
-                onDismiss = { jumping = false },
-            )
-        }
-        if (tuning) {
-            DisplaySheet(model, onDismiss = { tuning = false })
-        }
+    // No back handler for the picker here on purpose. The panel wires up
+    // its own, which registers later and therefore wins, and which goes
+    // out through the panel's exit animation. One here would only ever
+    // fire while that exit is already running, and all it could do is drop
+    // the panel mid slide, which is the exact jank the animation exists to
+    // avoid.
+
+    // Composed only while it is wanted. The panel plays its own way out
+    // before it calls back, which is why dismissing it is a callback and
+    // not this flag going false on the tap.
+    if (jumping) {
+        val years = jumpYears(model)
+        MonthYearSheet(
+            // The day view is anchored on the selected day rather than on
+            // the anchor, so the picker opens on the month you can see.
+            initial = if (model.view == ViewMode.Day) model.selected else model.anchor,
+            minYear = years.first,
+            maxYear = years.last,
+            onPick = { model.select(it) },
+            onDismiss = { jumping = false },
+        )
+    }
+    if (tuning) {
+        DisplaySheet(model, onDismiss = { tuning = false })
     }
 }
 
@@ -286,37 +323,14 @@ private fun jumpYears(model: SkemaModel): IntRange {
     return marks.min()..marks.max()
 }
 
-/**
- * One pane or two, which is a question about the frame and nothing else.
- *
- * onMenu is null when the sidebar is a rail: there is nothing to open, so
- * the top bar draws no control for it.
- */
+/** One pane or two, which is a question about the frame and nothing else. */
 @Composable
-private fun Panes(
-    model: SkemaModel,
-    palette: CoursePalette,
-    frame: Frame,
-    onJump: () -> Unit,
-    onMenu: (() -> Unit)?,
-    onTune: () -> Unit,
-) {
-    if (frame.dual) {
-        DualPane(model, palette, frame, onJump, onMenu, onTune)
-    } else {
-        SinglePane(model, palette, onJump, onMenu, onTune)
-    }
+private fun Panes(model: SkemaModel, palette: CoursePalette, frame: Frame) {
+    if (frame.dual) DualPane(model, palette, frame) else SinglePane(model, palette)
 }
 
 @Composable
-private fun DualPane(
-    model: SkemaModel,
-    palette: CoursePalette,
-    frame: Frame,
-    onJump: () -> Unit,
-    onMenu: (() -> Unit)?,
-    onTune: () -> Unit,
-) {
+private fun DualPane(model: SkemaModel, palette: CoursePalette, frame: Frame) {
     val c = skema
     // A third of the width, floored so the rail can hold a room list and
     // capped so the week never loses the space it actually needs.
@@ -328,12 +342,9 @@ private fun DualPane(
     BackHandler(enabled = model.picked != null) { model.picked = null }
 
     Row(Modifier.fillMaxSize()) {
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            TopBar(model, onJump, onMenu, onTune)
-            // The rail has the day, so the month view does not list it too.
-            CompositionLocalProvider(LocalDayAside provides true) {
-                Calendar(model, palette, Modifier.weight(1f))
-            }
+        // The rail has the day, so the month view does not list it too.
+        CompositionLocalProvider(LocalDayAside provides true) {
+            Calendar(model, palette, Modifier.weight(1f).fillMaxHeight())
         }
         Box(Modifier.width(1.dp).fillMaxHeight().background(c.hairline))
         Box(Modifier.width(rail).fillMaxHeight().background(c.surface)) {
@@ -352,15 +363,8 @@ private fun DualPane(
 }
 
 @Composable
-private fun SinglePane(
-    model: SkemaModel,
-    palette: CoursePalette,
-    onJump: () -> Unit,
-    onMenu: (() -> Unit)?,
-    onTune: () -> Unit,
-) {
+private fun SinglePane(model: SkemaModel, palette: CoursePalette) {
     Column(Modifier.fillMaxSize()) {
-        TopBar(model, onJump, onMenu, onTune)
         // The calendar takes what the pane leaves. The pane animates its
         // height, so the grid resizes with it rather than being covered.
         Calendar(model, palette, Modifier.weight(1f))
@@ -437,21 +441,17 @@ private fun CalendarBody(model: SkemaModel, palette: CoursePalette) {
 }
 
 /**
- * The bar above the calendar. Left to right: the menu control while the
- * sidebar is a drawer, the two line headline, and three controls at the
- * right end. Those three are the ones every Android user already knows from
- * that corner, today, tune and more, drawn with Material's own glyphs for
- * the same reason nobody redraws the back arrow.
+ * The bar above the calendar, Material's top app bar. Left to right: the
+ * menu control while the sidebar is a drawer, the two line headline, and
+ * three controls at the right end. Those three are the ones every Android
+ * user already knows from that corner, today, tune and more, drawn with
+ * Material's own glyphs for the same reason nobody redraws the back arrow.
  *
  * Today stays in the row and dims when today is already on screen. It used
  * to vanish instead, and a control that comes and goes moves everything
  * beside it under the finger reaching for it.
- *
- * The bar's own side padding is Space.tight rather than Space.medium, so a
- * control's glyph, which sits Space.small inside its touch target, lands
- * about where the headline used to start. The headline itself keeps that
- * old margin by padding when there is no menu control ahead of it.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TopBar(
     model: SkemaModel,
@@ -465,22 +465,21 @@ private fun TopBar(
     // the exception: it is not showing a month, so it has no month to jump to.
     val jumpable = model.view != ViewMode.Agenda
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = Space.tight, vertical = Space.small)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    TopAppBar(
+        navigationIcon = {
             if (onMenu != null) {
-                BarButton(Ico.Menu, "Open the menu", onMenu)
+                IconButton(onClick = onMenu) {
+                    Glyph(Ico.Menu, tint = LocalContentColor.current, size = IconSizeLarge, description = "Open the menu")
+                }
             }
-            Column(Modifier.weight(1f).padding(start = Space.small)) {
+        },
+        title = {
+            Column {
                 Row(
-                    // Pulled back by its own padding, so the headline still
-                    // starts on the same line as the subhead under it: the
-                    // padding is there to give the tap something to land on,
-                    // not to indent the title.
                     Modifier
-                        .offset(x = -Space.tight)
-                        .clip(pillShape())
+                        .clip(MaterialTheme.shapes.small)
                         .clickable(enabled = jumpable, onClick = onJump)
-                        .padding(horizontal = Space.tight, vertical = Space.unit),
+                        .padding(horizontal = Space.unit),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -492,11 +491,7 @@ private fun TopBar(
                         color = c.ink,
                         fontSize = Type.large,
                         fontWeight = FontWeight.SemiBold,
-                        // Nothing here is ever abbreviated, so a line that
-                        // will not fit takes a second one instead. The longest
-                        // this line gets is the countdown before a block
-                        // opens, and that is three weeks at most.
-                        maxLines = 2,
+                        maxLines = 1,
                     )
                     if (jumpable) {
                         Spacer(Modifier.width(Space.tight))
@@ -511,42 +506,31 @@ private fun TopBar(
                         )
                     }
                 }
-                Text(subhead(model), color = c.inkMuted, fontSize = Type.small, maxLines = 1)
+                Text(
+                    subhead(model),
+                    color = c.inkMuted,
+                    fontSize = Type.small,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = Space.unit),
+                )
             }
-
-            Spacer(Modifier.width(Space.tight))
+        },
+        actions = {
             // Live only when pressing it would move something. Asking whether
             // the anchor is today was the wrong question: stepping a day
             // forward and switching to week left the anchor on tomorrow, same
             // week, so the control was live and did nothing.
-            BarButton(Ico.Today, "Go to today", { model.goToday() }, enabled = !model.showingToday)
+            IconButton(onClick = { model.goToday() }, enabled = !model.showingToday) {
+                Glyph(Ico.Today, tint = LocalContentColor.current, size = IconSizeLarge, description = "Go to today")
+            }
             // Tune is the calendar's settings, a sheet over the calendar, not
             // the app's, which are a screen behind the sidebar.
-            BarButton(Ico.Tune, "Calendar settings", onTune)
-            Overflow(model)
-        }
-
-        // "Nothing moved, 736 entries" is worth saying once and then not
-        // worth a permanent line of a 700dp tall screen. A failure stays put,
-        // because that one you have to act on. This is also the only place a
-        // background sync becomes visible, which is the point of keeping it.
-        if (model.status.isNotBlank()) {
-            if (!model.failed && !model.busy) {
-                LaunchedEffect(model.status) {
-                    delay(6_000)
-                    model.clearStatus()
-                }
+            IconButton(onClick = onTune) {
+                Glyph(Ico.Tune, tint = LocalContentColor.current, size = IconSizeLarge, description = "Calendar settings")
             }
-            Spacer(Modifier.height(Space.unit))
-            Text(
-                model.status,
-                color = if (model.failed) c.accentStrong else c.inkMuted,
-                fontSize = Type.small,
-                maxLines = 1,
-                modifier = Modifier.padding(start = Space.small),
-            )
-        }
-    }
+            Overflow(model)
+        },
+    )
 }
 
 /**
@@ -556,63 +540,35 @@ private fun TopBar(
  * know it ran; Semesters because it is the other screen. Anything the
  * sidebar already offers as a view stays out, or the menu becomes a second
  * sidebar.
- *
- * A plain Popup rather than Material's DropdownMenu, which arrives with its
- * own corner shape, elevation and colours, all somebody else's app. Focusable
- * so a tap anywhere else, or back, is the way out.
  */
 @Composable
 private fun Overflow(model: SkemaModel) {
-    val c = skema
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
-    val shape = SquircleShape(Radius.card)
 
     Box {
-        BarButton(Ico.More, "More", { open = true })
-        if (open) {
-            Popup(
-                alignment = Alignment.TopEnd,
-                onDismissRequest = { open = false },
-                properties = PopupProperties(focusable = true),
-            ) {
-                Column(
-                    Modifier
-                        .width(IntrinsicSize.Max)
-                        .background(c.surface, shape)
-                        .border(1.dp, c.hairline, shape)
-                        .clip(shape)
-                        .padding(vertical = Space.small),
-                ) {
-                    MenuRow(if (model.busy) "Syncing" else "Sync now", Ico.Sync, enabled = !model.busy) {
-                        open = false
-                        scope.launch { model.refresh() }
-                    }
-                    MenuRow("Semesters", Ico.Fold) {
-                        open = false
-                        model.screen = Screen.Semesters
-                    }
-                }
-            }
+        IconButton(onClick = { open = true }) {
+            Glyph(Ico.More, tint = LocalContentColor.current, size = IconSizeLarge, description = "More")
         }
-    }
-}
-
-/** One line of the overflow, in the sidebar's own idiom of glyph then label. */
-@Composable
-private fun MenuRow(label: String, ico: Ico, enabled: Boolean = true, onClick: () -> Unit) {
-    val c = skema
-    val fg = if (enabled) c.ink else c.inkMuted
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = Space.medium, vertical = Space.small),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.medium),
-    ) {
-        Glyph(ico, tint = fg)
-        Text(label, color = fg, fontSize = Type.normal, maxLines = 1)
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(if (model.busy) "Syncing" else "Sync now") },
+                leadingIcon = { Glyph(Ico.Sync, tint = LocalContentColor.current) },
+                enabled = !model.busy,
+                onClick = {
+                    open = false
+                    scope.launch { model.refresh() }
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Semesters") },
+                leadingIcon = { Glyph(Ico.Fold, tint = LocalContentColor.current) },
+                onClick = {
+                    open = false
+                    model.screen = Screen.Semesters
+                },
+            )
+        }
     }
 }
 
@@ -634,9 +590,9 @@ private fun MenuRow(label: String, ico: Ico, enabled: Boolean = true, onClick: (
  * height or flick it, or press back. Picking another class swaps the content
  * in place with a fade.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DetailPane(model: SkemaModel, palette: CoursePalette) {
-    val c = skema
     val picked = model.picked
     val reduced = reducedMotion()
     val frame = LocalFrame.current
@@ -734,42 +690,37 @@ private fun DetailPane(model: SkemaModel, palette: CoursePalette) {
         label = "detail",
     ) {
         val event = shown ?: return@AnimatedVisibility
-        Column(
-            Modifier
+        // A Material surface a step above the page, with Material's own
+        // drag handle: the pane is the same object a bottom sheet is, in a
+        // split rather than over it, and it should look like one.
+        Surface(
+            modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = frame.height * PARTIAL)
                 .padding(horizontal = Space.small)
                 .padding(bottom = Space.small)
                 .graphicsLayer { translationY = pulled.value }
                 .onSizeChanged { paneHeight = it.height }
-                .clip(SquircleShape(Radius.sheet))
-                .background(c.surface)
                 .nestedScroll(nested)
                 .draggable(
                     state = rememberDraggableState { dy -> take(dy) },
                     orientation = Orientation.Vertical,
                     onDragStopped = { velocity -> settle(velocity) },
                 ),
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 2.dp,
         ) {
-            // The grab strip: the mark that says the pane moves, the same one
-            // every panel in the app wears.
-            Box(
-                Modifier.fillMaxWidth().padding(vertical = Space.medium),
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    Modifier
-                        .width(Space.large + Space.medium)
-                        .height(Space.unit)
-                        .background(c.hairline, pillShape()),
-                )
-            }
-            Crossfade(targetState = event, animationSpec = tween(Motion.FADE), label = "picked") { e ->
-                EventDetail(
-                    event = e,
-                    tint = palette.tint(e.courseCode),
-                    conflict = e.startEpochSeconds in model.conflicts,
-                )
+            Column {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    BottomSheetDefaults.DragHandle()
+                }
+                Crossfade(targetState = event, animationSpec = tween(Motion.FADE), label = "picked") { e ->
+                    EventDetail(
+                        event = e,
+                        tint = palette.tint(e.courseCode),
+                        conflict = e.startEpochSeconds in model.conflicts,
+                    )
+                }
             }
         }
     }
