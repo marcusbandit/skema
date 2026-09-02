@@ -31,7 +31,12 @@ kotlin {
             implementation(libs.compose.icons.fontawesome)
         }
         commonTest.dependencies { implementation(kotlin("test")) }
-        androidMain.dependencies { implementation(libs.ktor.client.okhttp) }
+        androidMain.dependencies {
+            implementation(libs.ktor.client.okhttp)
+            // Only for BackHandler: the system back gesture is an Android
+            // concept and Compose Multiplatform 1.12 has no common one.
+            implementation(libs.androidx.activity.compose)
+        }
         jvmMain.dependencies { implementation(libs.ktor.client.cio) }
     }
 }

@@ -1,6 +1,9 @@
 package com.marcusrosado.skemafordtu.ics
 
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.daysUntil
+import kotlinx.datetime.minus
 
 /**
  * Which semester an entry belongs to.
@@ -36,6 +39,28 @@ data class Term(val season: Season, val year: Int) : Comparable<Term> {
             Season.Spring -> LocalDate(year, 2, 1)
             Season.Summer -> LocalDate(year, 6, 21)
             Season.Fall -> LocalDate(year, 8, 15)
+        }
+
+    /**
+     * The Monday that semester week 1 begins on.
+     *
+     * DTU teaches in thirteen week blocks and everyone counts in them: a
+     * course says what happens in week 5, not what happens on 5 October. The
+     * autumn block opens on the Monday of the week holding 1 September, which
+     * in 2026 is Monday 31 August, and the spring block on the Monday of the
+     * week holding 1 February. Anchoring on the Monday of a week rather than
+     * on the first Monday after a date is what makes the autumn open on the
+     * 31st rather than a week later, and it matches what the university's own
+     * week numbers do.
+     */
+    val teachingStartsOn: LocalDate
+        get() {
+            val anchor = when (season) {
+                Season.Spring -> LocalDate(year, 2, 1)
+                Season.Summer -> LocalDate(year, 6, 22)
+                Season.Fall -> LocalDate(year, 9, 1)
+            }
+            return anchor.minus(anchor.dayOfWeek.ordinal, DateTimeUnit.DAY)
         }
 }
 
@@ -75,6 +100,21 @@ object Terms {
         7 -> Term(Season.Summer, date.year)
         8 -> if (date.dayOfMonth < 15) Term(Season.Summer, date.year) else Term(Season.Fall, date.year)
         else -> Term(Season.Fall, date.year)
+    }
+
+    /** Teaching weeks in a DTU block, before the exam period that follows it. */
+    const val TEACHING_WEEKS = 13
+
+    /**
+     * Which week of its semester a date falls in, counting from 1.
+     *
+     * Can exceed [TEACHING_WEEKS], which is the exam period rather than an
+     * error, and can be zero or negative in the gap before a block opens. The
+     * caller decides what to call those; this only counts.
+     */
+    fun semesterWeek(date: LocalDate): Int {
+        val start = of(date).teachingStartsOn
+        return start.daysUntil(date) / 7 + 1
     }
 
     /** Stated term first, date second. Total, so every event lands somewhere. */
