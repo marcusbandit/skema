@@ -16,8 +16,8 @@ android {
         // the same app and an install was a silent no-op unless it happened to
         // replace the file. versionName is what the owner reads; versionCode
         // is the only number Android compares.
-        versionCode = 10
-        versionName = "0.7.0"
+        versionCode = 11
+        versionName = "0.8.0"
     }
 
     buildFeatures { compose = true }

@@ -1,8 +1,9 @@
 # skema
 
-A Kotlin Multiplatform calendar for DTU Learn. Paste your calendar link into
-Settings and it syncs, caches and shows your timetable. Runs on Android and on
-the desktop from the same code.
+An Android calendar for DTU Learn. Paste your calendar link into Settings and
+it syncs, caches and shows your timetable. The app is native Android, Jetpack
+Compose with Material 3; the parser, merging and storage underneath are a
+Kotlin Multiplatform library with no UI in it.
 
 ## Why this exists
 
@@ -22,8 +23,6 @@ looked at, not left at `assembleDebug`:
     scripts/fold.sh fold | unfold      # drive the hinge
     scripts/postures.sh <label>        # capture both postures at once
 
-    ./gradlew :desktopApp:run          # same UI in a window, for quick looks
-
 The emulator is headless by default and driven entirely over adb. That is not
 a limitation: `screencap` gives exact device pixels, and no window has to
 appear on anyone's workspace. `scripts/emulator.sh --window` if you want to
@@ -33,8 +32,8 @@ The AVD is `skema_fold`, a Pixel Fold profile with a real hinge. Folded it is
 411 x 797 dp, unfolded 841 x 701 dp.
 
 Then open Settings and paste your feed URL. It is stored in the app's own
-private directory (`~/.local/share/skema` on the desktop, `filesDir` on
-Android) and never leaves the device except to ask DTU for the feed.
+private directory (`filesDir`) and never leaves the device except to ask DTU
+for the feed.
 
 ## What it does
 
@@ -47,9 +46,12 @@ Four views: month, week, day and agenda. Week is the one the timetable is
 actually read in, so it is the default. Pinching zooms the hour height, and
 pinching past either end of the range walks to the next view along, so month
 to week to day is one continuous gesture. Swiping sideways moves a week, a
-day or a month depending on what is showing. The grid is the whole 24 hours,
-always: a window derived from the events put the same 13:00 at a different
-height on different weeks.
+day or a month depending on what is showing. The grid shows 07:00 to 18:00,
+the teaching day, and a day or a week with a class outside that grows in
+whole hours to hold it. Tap a class and its detail opens in a pane under
+the grid; in the month view the tapped day is listed under the grid as a
+graph, the way git draws history, with overlapping classes in lanes and a
+same course session forked off its lecture.
 
 Syncing is not a button. It runs when the app opens and every five minutes
 after that, which is far finer than the scale a timetable changes on, so
@@ -90,8 +92,8 @@ the generic word goes underneath.
 
 ## The parser
 
-`shared/src/commonMain/kotlin/dk/bandit/skema/ics/` parses the DTU Learn
-iCalendar feed. It has no Android or JVM dependencies, so it runs anywhere
+`shared/src/commonMain/kotlin/com/marcusrosado/skemafordtu/ics/` parses the
+DTU Learn iCalendar feed. It has no Android dependencies, so it runs anywhere
 Kotlin does, and its tests run in milliseconds as plain JVM tests.
 
     ./gradlew :shared:jvmTest
@@ -166,12 +168,14 @@ semester DTU itself named.
 
 ## Folding
 
-The app branches on size in exactly one place, `CalendarShell`. A pane at
-least 600dp wide gets two panes, the calendar and a rail holding the selected
-day or the tapped event; anything narrower gets one pane and a bottom sheet.
-600dp rather than 840dp because the unfolded inner screen is 841 x 701 lying
-down and 701 x 841 standing up, and a device should not change layout when
-you rotate it.
+The app branches on size in two places. The sidebar follows Material's
+window size classes: a modal navigation drawer on a compact width, a
+navigation rail on medium and expanded. The panes are decided in
+`CalendarShell`: a pane at least 600dp wide gets two, the calendar and a
+rail holding the selected day or the tapped event; anything narrower gets
+one, with the tapped event in a pane under the grid. 600dp rather than 840dp
+because the unfolded inner screen is 841 x 701 lying down and 701 x 841
+standing up, and a device should not change layout when you rotate it.
 
 Views measure the pane they were given, not the window, which is what stops
 five day columns being sized for 841dp and drawn into 571dp.
@@ -186,14 +190,16 @@ running app: same pid, no activity relaunch, pixel-identical afterwards.
 
 ## Layout
 
-    shared/       KMP library. Parsing, merging, storage, network, Compose UI.
-                  Everything except the two lines each platform needs.
-    androidApp/   Android application. AGP 9 forbids the application plugin
-                  inside a KMP module, so this is deliberately separate.
-    desktopApp/   Plain JVM. Same UI, no emulator, fast iteration.
+    shared/       KMP library. Parsing, merging, terms, storage, network.
+                  No UI. Keeps a JVM target so its tests run without a device.
+    androidApp/   The app: Jetpack Compose with Material 3, every screen and
+                  the model, and the UI unit tests.
 
-iOS is left out because linking it needs a Mac. `shared/build.gradle.kts`
-has the two lines to add it back.
+The UI used to be Compose Multiplatform in `shared`, with a desktop target
+beside Android. On 2026-09-02 it became a native Android app: the desktop
+target went, the drawing code moved into `androidApp` unchanged, since
+Compose Multiplatform code is Jetpack Compose code, and the chrome was
+rebuilt from stock Material 3 parts. iOS is not a target for now.
 
 ## Versioning and identity
 
@@ -208,14 +214,15 @@ the same app to it: the second install is a silent no-op or an unexplained
 
 ## Toolchain
 
-Kotlin 2.4.10, Compose Multiplatform 1.12.0, AGP 9.1.0, Gradle 9.5.0,
+Kotlin 2.4.10, Jetpack Compose BOM 2025.12.01 (Material 3 1.4.0), AGP 9.3.2,
 kotlinx-datetime 0.8.0, compileSdk 37, minSdk 26. Gradle runs on JDK 21 via
 `org.gradle.java.home`; JDK 26 also works but 21 matches what the IDE ships.
 
 ## Platform glue, all of it
 
-Two things cannot be written in common code, so each has an `expect` and two
-`actual`s in `shared/src/{android,jvm}Main`:
+Two things in the shared library cannot be written in common code, so each
+has an `expect` and two `actual`s in `shared/src/{android,jvm}Main`, the JVM
+side existing for the tests:
 
     Vault      where files go. Android needs a Context, so MainActivity calls
                SkemaAndroid.init(applicationContext) before App().
@@ -231,7 +238,8 @@ Three font sizes for the whole app, from `Type` in `ui/Theme.kt`, with
 hierarchy carried by weight, colour and space. No font family is named
 anywhere, so every face is the platform's own system sans and nothing is
 downloaded. Every rounded corner goes through `SquircleShape`, which is
-G2-continuous; `RoundedCornerShape` appears nowhere.
+G2-continuous: it is set as all five of the Material theme's shape tokens, so
+stock parts wear it too, and `RoundedCornerShape` appears nowhere.
 
 Anything that scales with a count is computed from the count. Day columns,
 overlap lanes, hue assignment, month cell dots and hour label density are all

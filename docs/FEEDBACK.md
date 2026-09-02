@@ -3,6 +3,16 @@
 Verbatim intent from the owner, kept here because it outlives any one session.
 Tick items off only when they are verified on a device, not when they compile.
 
+## Round five, 2026-09-02, native Android
+
+- "Branch off and then make a native ui for Android ... please use native
+  frontend from now on." iOS is not a focus. Chosen when asked: Jetpack
+  Compose with Material 3 in the app module; the desktop target and the
+  shared UI dropped. Done on the native-android branch, every screen looked
+  at folded and unfolded. Not merged and not released without asking.
+- Earlier notes that the drawer must push rather than overlay are superseded:
+  the stock Material drawer overlays with a scrim, and native won.
+
 ## Round four, 2026-09-02, built and looked at on the emulator
 
 Two School Planner screenshots came with this round: its drawer, and its
