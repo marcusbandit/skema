@@ -76,6 +76,7 @@ fun DisplaySheet(model: SkemaModel, onDismiss: () -> Unit) {
                         label = { it.name },
                         onSelect = { choice -> model.update { it.copy(theme = choice) } },
                         modifier = Modifier.fillMaxWidth(),
+                        ico = { themeGlyph(it) },
                     )
                 }
                 Divider()
@@ -88,6 +89,17 @@ fun DisplaySheet(model: SkemaModel, onDismiss: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * The theme choices as pictures: a monitor for whatever the phone says, a
+ * sun and a moon for the two it can be told. Three words in a row read as
+ * a sentence; three glyphs read as a switch.
+ */
+internal fun themeGlyph(choice: ThemeChoice): Ico = when (choice) {
+    ThemeChoice.System -> Ico.Monitor
+    ThemeChoice.Light -> Ico.Sun
+    ThemeChoice.Dark -> Ico.Moon
 }
 
 /**

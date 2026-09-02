@@ -32,6 +32,11 @@ calendar with the hamburger, the day disc and the three toolbar icons circled.
   run as lines side by side; overlapping things of the same course are a
   branch, forked off and merged back. Done. Tap a day to list it, tap it
   again to open its week.
+- The whole line coloured, not only the branch: the trunk wears the colour
+  of whatever last sat on it. Done. A clash that lasts to the end of the
+  day runs on beside the trunk into a tail; checked on 4 September 2025.
+- The theme picker is a monitor, a sun and a moon, not three words. Done,
+  in the sheet and on the Settings screen.
 
 ### Theme
 - The status bar's clock and icons went white on the light app, because Android

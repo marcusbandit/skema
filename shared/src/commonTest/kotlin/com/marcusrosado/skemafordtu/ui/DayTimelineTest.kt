@@ -23,6 +23,7 @@ class DayTimelineTest {
         assertEquals(1, g.lanes)
         assertTrue(g.rows.all { it.forkFrom == null && it.through.isEmpty() && it.merges.isEmpty() })
         assertTrue(g.openBranches.isEmpty())
+        assertTrue(g.openLanes.isEmpty())
     }
 
     @Test
@@ -34,6 +35,15 @@ class DayTimelineTest {
         assertNull(g.rows[1].forkFrom)
         assertEquals(listOf(0), g.rows[1].through)
         assertTrue(g.openBranches.isEmpty())
+        // It is the last row and still running, so its line runs out in the tail.
+        assertEquals(listOf(1), g.openLanes)
+    }
+
+    @Test
+    fun aClashThatEndsBeforeTheNextRowIsNotOpen() {
+        val g = graph(Ev(540, 660, "A"), Ev(600, 630, "B"), Ev(700, 720, "C"))
+        assertTrue(g.openLanes.isEmpty())
+        assertEquals(false, g.rows[1].continues)
     }
 
     @Test

@@ -29,6 +29,8 @@ import com.composables.icons.lucide.Link2
 import com.composables.icons.lucide.List
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.MapPin
+import com.composables.icons.lucide.Monitor
+import com.composables.icons.lucide.Moon
 import com.composables.icons.lucide.Palette
 import com.composables.icons.lucide.RectangleVertical
 import com.composables.icons.lucide.RefreshCw
@@ -36,6 +38,7 @@ import com.composables.icons.lucide.RotateCcw
 import com.composables.icons.lucide.Rows3
 import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Sun
 import com.composables.icons.lucide.SunMoon
 import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.X
@@ -72,6 +75,11 @@ enum class Ico {
     // Added for the top bar: the overflow, third of the three controls at
     // its right end.
     More,
+
+    // Added for the theme picker: the three choices as pictures, a monitor
+    // for whatever the phone says and a sun and a moon for the two it can
+    // be told.
+    Monitor, Sun, Moon,
 }
 
 /**
@@ -170,6 +178,9 @@ private val Ico.vector: ImageVector
         Ico.Storage -> Lucide.Database
         Ico.Trash -> Lucide.Trash2
         Ico.Theme -> Lucide.SunMoon
+        Ico.Monitor -> Lucide.Monitor
+        Ico.Sun -> Lucide.Sun
+        Ico.Moon -> Lucide.Moon
         Ico.Layout -> Lucide.LayoutGrid
         Ico.Fold -> Lucide.Layers
 

@@ -169,7 +169,8 @@ fun Tag(
 
 /**
  * A row of mutually exclusive choices. Widths come from the count, so adding
- * a fourth option needs no layout change.
+ * a fourth option needs no layout change. With [ico] each option is a glyph
+ * instead of a word, and the word becomes what a screen reader says for it.
  */
 @Composable
 fun <T> Segmented(
@@ -178,6 +179,7 @@ fun <T> Segmented(
     label: (T) -> String,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
+    ico: ((T) -> Ico)? = null,
 ) {
     val c = skema
     Row(
@@ -195,12 +197,17 @@ fun <T> Segmented(
                     .padding(vertical = Space.tight),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    label(option),
-                    color = if (active) c.onAccent else c.inkMuted,
-                    fontSize = Type.small,
-                    fontWeight = FontWeight.Medium,
-                )
+                val fg = if (active) c.onAccent else c.inkMuted
+                if (ico != null) {
+                    Glyph(ico(option), tint = fg, description = label(option))
+                } else {
+                    Text(
+                        label(option),
+                        color = fg,
+                        fontSize = Type.small,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
     }

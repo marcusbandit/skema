@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -374,6 +375,10 @@ private fun DotRow(
                 "+" + (events.size - count),
                 color = c.inkMuted,
                 fontSize = Type.small,
+                // Set on the row's own height, so the label sits inside the
+                // strip the dots reserve instead of spilling into the week
+                // below, which drew over its bottom half.
+                lineHeight = with(LocalDensity.current) { MARK.toSp() },
                 maxLines = 1,
             )
         }

@@ -198,6 +198,7 @@ private fun SettingsList(model: SkemaModel, onSubjects: () -> Unit) {
                         label = { it.name },
                         onSelect = { choice -> model.update { it.copy(theme = choice) } },
                         modifier = Modifier.fillMaxWidth(),
+                        ico = { themeGlyph(it) },
                     )
                 }
                 Divider()

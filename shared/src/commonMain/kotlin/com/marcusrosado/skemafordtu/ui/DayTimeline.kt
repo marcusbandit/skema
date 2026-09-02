@@ -66,6 +66,17 @@ fun DayTimeline(
         dayGraph(timed, { it.startMinute() }, { it.endMinute() }, { it.courseCode })
     }
     val width = TRUNK_X * 2 + LANE_GAP * (graph.lanes - 1).coerceAtLeast(0)
+    val colourOf: (Int) -> Color = { palette.tint(graph.placed[it].item.courseCode).rail }
+    val open = graph.openBranches.isNotEmpty() || graph.openLanes.isNotEmpty()
+
+    // The trunk is coloured by whatever last sat on it: the line between two
+    // classes wears the earlier one's colour and changes at each dot, so the
+    // whole graph is in course colours and nothing on it is grey.
+    var trunk = when {
+        graph.rows.isNotEmpty() -> colourOf(0)
+        allDay.isNotEmpty() -> palette.tint(allDay.first().courseCode).rail
+        else -> c.hairline
+    }
 
     Column(modifier) {
         TimelineHeader(date)
@@ -83,16 +94,18 @@ fun DayTimeline(
 
         // The trunk between the header's disc and the first row, so the line
         // visibly starts at the day rather than at the first thing on it.
+        val bridge = trunk
         Canvas(Modifier.width(width).height(Space.small)) {
-            drawLine(c.hairline, Offset(TRUNK_X.toPx(), 0f), Offset(TRUNK_X.toPx(), size.height), LINE.toPx())
+            drawLine(bridge, Offset(TRUNK_X.toPx(), 0f), Offset(TRUNK_X.toPx(), size.height), LINE.toPx())
         }
 
         // Whole day entries first, on the trunk, with a ring rather than a
         // dot: they are on the day without being at any point of it.
         allDay.forEach { event ->
             val tint = palette.tint(event.courseCode).rail
+            val through = trunk
             TimelineRow(event, "All day", width, onPick) { h ->
-                drawLine(c.hairline, Offset(TRUNK_X.toPx(), 0f), Offset(TRUNK_X.toPx(), h), LINE.toPx())
+                drawLine(through, Offset(TRUNK_X.toPx(), 0f), Offset(TRUNK_X.toPx(), h), LINE.toPx())
                 drawCircle(tint, DOT.toPx() / 2 - LINE.toPx() / 2, Offset(TRUNK_X.toPx(), h / 2), style = Stroke(LINE.toPx()))
             }
         }
@@ -103,24 +116,38 @@ fun DayTimeline(
             // A stamp is a moment, and a moment has one time.
             val from = clockOfMinute(event.startMinute())
             val span = if (event.isMarker()) from else from + " → " + clockOfMinute(event.endMinute())
-            // The trunk stops at the last dot, unless a branch still has to
-            // come home below it.
-            val last = row.index == graph.rows.lastIndex && graph.openBranches.isEmpty()
+            // The trunk stops at the last dot, unless a line still has to run
+            // on below it.
+            val last = row.index == graph.rows.lastIndex && !open
+            // Whether this row's own line goes on below its dot: it is still
+            // running at the next row, it is a branch with a merge waiting,
+            // or it runs out into the tail.
+            val carryOn = row.continues || row.forkFrom != null || row.index in graph.openLanes
+            // Captured per row, because the paint runs later and a var would
+            // hand every row the colour the loop ended on.
+            val above = trunk
+            if (placed.lane == 0) trunk = colourOf(row.index)
+            val below = trunk
             TimelineRow(event, span, width, onPick) { h ->
-                paintRow(graph, row, h, last, trunk = c.hairline) { palette.tint(graph.placed[it].item.courseCode).rail }
+                paintRow(graph, row, h, last, carryOn, above, below, colourOf)
             }
         }
 
-        // Branches still running when the list runs out come home here, so a
-        // lab that outlasts the day's last row still ends on the trunk rather
-        // than in mid air.
-        if (graph.openBranches.isNotEmpty()) {
+        // Lines still running when the list runs out finish here. A branch
+        // comes home to the trunk, so a lab that outlasts the day's last row
+        // still ends on it rather than in mid air; a lane of its own, a clash
+        // that lasts to the end, runs on beside the trunk and stops with it.
+        if (open) {
+            val tail = trunk
             Canvas(Modifier.width(width).height(Space.large)) {
                 val x0 = TRUNK_X.toPx()
-                drawLine(c.hairline, Offset(x0, 0f), Offset(x0, size.height), LINE.toPx())
+                drawLine(tail, Offset(x0, 0f), Offset(x0, size.height), LINE.toPx())
                 graph.openBranches.forEach { j ->
-                    val tint = palette.tint(graph.placed[j].item.courseCode).rail
-                    curve(tint, Offset(laneX(graph.placed[j].lane), 0f), Offset(x0, size.height))
+                    curve(colourOf(j), Offset(laneX(graph.placed[j].lane), 0f), Offset(x0, size.height))
+                }
+                graph.openLanes.forEach { j ->
+                    val x = laneX(graph.placed[j].lane)
+                    drawLine(colourOf(j), Offset(x, 0f), Offset(x, size.height), LINE.toPx(), cap = StrokeCap.Round)
                 }
             }
         }
@@ -211,21 +238,25 @@ private fun TimelineRow(
 private fun DrawScope.laneX(lane: Int): Float = (TRUNK_X + LANE_GAP * lane).toPx()
 
 /**
- * Paints one row of the graph: the trunk, every lane passing through from
- * above, any branch merging back on this row, this row's own fork if it is
- * one, its line onward if it is still running, and last its dot, on top.
+ * Paints one row of the graph: the trunk in the colour it arrives with and
+ * the colour it leaves with, every lane passing through from above, any
+ * branch merging back on this row, this row's own fork if it is one, its
+ * line onward if it is still running, and last its dot, on top.
  */
 private fun DrawScope.paintRow(
     graph: DayGraph<CalendarEvent>,
     row: GraphRow,
     h: Float,
     last: Boolean,
-    trunk: Color,
+    carryOn: Boolean,
+    above: Color,
+    below: Color,
     colour: (Int) -> Color,
 ) {
     val stroke = LINE.toPx()
     val x0 = laneX(0)
-    drawLine(trunk, Offset(x0, 0f), Offset(x0, if (last) h / 2 else h), stroke)
+    drawLine(above, Offset(x0, 0f), Offset(x0, h / 2), stroke)
+    if (!last) drawLine(below, Offset(x0, h / 2), Offset(x0, h), stroke)
 
     row.through.forEach { j ->
         val lane = graph.placed[j].lane
@@ -241,10 +272,7 @@ private fun DrawScope.paintRow(
     if (row.forkFrom != null) {
         curve(tint, Offset(laneX(graph.placed[row.forkFrom].lane), 0f), Offset(x, h / 2))
     }
-    // A branch always carries on below its dot, because a merge or the tail
-    // is waiting to take it; a lane of its own only does while it is still
-    // running when the next row starts.
-    if (own.lane > 0 && (row.continues || row.forkFrom != null)) {
+    if (own.lane > 0 && carryOn) {
         drawLine(tint, Offset(x, h / 2), Offset(x, h), stroke)
     }
     drawCircle(tint, DOT.toPx() / 2, Offset(x, h / 2))
@@ -291,6 +319,8 @@ internal data class DayGraph<T>(
     val rows: List<GraphRow>,
     /** Branches still running when the rows run out, to be merged in the tail. */
     val openBranches: List<Int>,
+    /** Lanes of their own still running when the rows run out, to be run out in the tail. */
+    val openLanes: List<Int>,
     /** How many lanes the day needs at its widest. */
     val lanes: Int,
 )
@@ -349,12 +379,13 @@ internal fun <T> dayGraph(
         )
     }
 
-    val open = if (n == 0) emptyList() else (0 until n).filter { forkFrom[it] != null && activeAt(it, n - 1) }
+    val stillRunning = if (n == 0) emptyList() else (0 until n).filter { placed[it].lane > 0 && activeAt(it, n - 1) }
 
     return DayGraph(
         placed = placed,
         rows = rows,
-        openBranches = open,
+        openBranches = stillRunning.filter { forkFrom[it] != null },
+        openLanes = stillRunning.filter { forkFrom[it] == null },
         lanes = (placed.maxOfOrNull { it.lane } ?: 0) + 1,
     )
 }
