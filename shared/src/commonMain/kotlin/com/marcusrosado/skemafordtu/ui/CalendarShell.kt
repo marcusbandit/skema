@@ -190,6 +190,10 @@ fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
         // top bar is a third of it.
         var jumping by remember { mutableStateOf(false) }
 
+        // Whether the calendar's settings sheet is up. Same place and same
+        // reason as the picker: it covers the frame, not the top bar.
+        var tuning by remember { mutableStateOf(false) }
+
         // The drawer is the narrow presentation of the same sidebar. Growing
         // into a rail closes it, so folding back never reveals a menu left
         // open in a posture that had no menu to open.
@@ -203,7 +207,12 @@ fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
                 Row(Modifier.fillMaxSize()) {
                     SidebarRail(model, Modifier.width(RAIL_WIDTH).fillMaxHeight())
                     Box(Modifier.weight(1f).fillMaxHeight()) {
-                        Panes(model, palette, frame, onJump = { jumping = true }, onMenu = null)
+                        Panes(
+                            model, palette, frame,
+                            onJump = { jumping = true },
+                            onMenu = null,
+                            onTune = { tuning = true },
+                        )
                     }
                 }
             } else {
@@ -211,7 +220,12 @@ fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
                 // pushes the calendar rather than covering it, so the frame
                 // the calendar measured itself against never changes.
                 SidebarScaffold(model, open = menuOpen, onOpenChange = { menuOpen = it }) {
-                    Panes(model, palette, frame, onJump = { jumping = true }, onMenu = { menuOpen = true })
+                    Panes(
+                        model, palette, frame,
+                        onJump = { jumping = true },
+                        onMenu = { menuOpen = true },
+                        onTune = { tuning = true },
+                    )
                 }
             }
         }
@@ -237,6 +251,9 @@ fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
                 onPick = { model.select(it) },
                 onDismiss = { jumping = false },
             )
+        }
+        if (tuning) {
+            DisplaySheet(model, onDismiss = { tuning = false })
         }
     }
 }
@@ -274,11 +291,12 @@ private fun Panes(
     frame: Frame,
     onJump: () -> Unit,
     onMenu: (() -> Unit)?,
+    onTune: () -> Unit,
 ) {
     if (frame.dual) {
-        DualPane(model, palette, frame, onJump, onMenu)
+        DualPane(model, palette, frame, onJump, onMenu, onTune)
     } else {
-        SinglePane(model, palette, onJump, onMenu)
+        SinglePane(model, palette, onJump, onMenu, onTune)
     }
 }
 
@@ -289,6 +307,7 @@ private fun DualPane(
     frame: Frame,
     onJump: () -> Unit,
     onMenu: (() -> Unit)?,
+    onTune: () -> Unit,
 ) {
     val c = skema
     // A third of the width, floored so the rail can hold a room list and
@@ -302,7 +321,7 @@ private fun DualPane(
 
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            TopBar(model, onJump, onMenu)
+            TopBar(model, onJump, onMenu, onTune)
             Calendar(model, palette, Modifier.weight(1f))
         }
         Box(Modifier.width(1.dp).fillMaxHeight().background(c.hairline))
@@ -327,10 +346,11 @@ private fun SinglePane(
     palette: CoursePalette,
     onJump: () -> Unit,
     onMenu: (() -> Unit)?,
+    onTune: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(model, onJump, onMenu)
+            TopBar(model, onJump, onMenu, onTune)
             Calendar(model, palette, Modifier.weight(1f))
         }
         // Always composed, never conditional: a sheet that is removed from
@@ -422,7 +442,12 @@ private fun CalendarBody(model: SkemaModel, palette: CoursePalette) {
  * old margin by padding when there is no menu control ahead of it.
  */
 @Composable
-private fun TopBar(model: SkemaModel, onJump: () -> Unit, onMenu: (() -> Unit)?) {
+private fun TopBar(
+    model: SkemaModel,
+    onJump: () -> Unit,
+    onMenu: (() -> Unit)?,
+    onTune: () -> Unit,
+) {
     val c = skema
 
     // The headline is a date, and a date is somewhere you can go. Agenda is
@@ -484,7 +509,9 @@ private fun TopBar(model: SkemaModel, onJump: () -> Unit, onMenu: (() -> Unit)?)
             // forward and switching to week left the anchor on tomorrow, same
             // week, so the control was live and did nothing.
             BarButton(Ico.Today, "Go to today", { model.goToday() }, enabled = !model.showingToday)
-            BarButton(Ico.Tune, "Settings", { model.screen = Screen.Settings })
+            // Tune is the calendar's settings, a sheet over the calendar, not
+            // the app's, which are a screen behind the sidebar.
+            BarButton(Ico.Tune, "Calendar settings", onTune)
             Overflow(model)
         }
 

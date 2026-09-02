@@ -264,7 +264,7 @@ private fun SettingsList(model: SkemaModel, onSubjects: () -> Unit) {
  * you find the feed section by its shape long before you have read the word.
  */
 @Composable
-private fun SectionLabel(text: String, ico: Ico? = null, modifier: Modifier = Modifier) {
+internal fun SectionLabel(text: String, ico: Ico? = null, modifier: Modifier = Modifier) {
     Row(
         modifier.padding(bottom = Space.tight, start = Space.unit),
         verticalAlignment = Alignment.CenterVertically,
@@ -282,7 +282,7 @@ private fun SectionLabel(text: String, ico: Ico? = null, modifier: Modifier = Mo
 
 /** A titled row holding a chooser, shaped like [Toggle] so the card lines up. */
 @Composable
-private fun Picker(title: String, ico: Ico, content: @Composable () -> Unit) {
+internal fun Picker(title: String, ico: Ico, content: @Composable () -> Unit) {
     val c = skema
     Row(Modifier.fillMaxWidth().padding(Space.small), verticalAlignment = Alignment.Top) {
         // Centred in a box one type step tall, so the glyph lands on the
@@ -304,7 +304,7 @@ private fun Picker(title: String, ico: Ico, content: @Composable () -> Unit) {
  * real question open. Most do not.
  */
 @Composable
-private fun Toggle(
+internal fun Toggle(
     title: String,
     checked: Boolean,
     onChange: (Boolean) -> Unit,
@@ -379,7 +379,7 @@ private fun Fact(label: String, value: String) {
 }
 
 @Composable
-private fun Divider() {
+internal fun Divider() {
     Box(
         Modifier
             .fillMaxWidth()

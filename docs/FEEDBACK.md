@@ -20,8 +20,10 @@ calendar with the hamburger, the day disc and the three toolbar icons circled.
   today, tune and the three dots at the right, all Material's own glyphs.
   Done. The edge handle is gone; the edge drag still works.
 - Today stays in the row and dims when today is on screen, instead of vanishing.
-- Tune opens Settings. The three dots hold Sync now and Semesters. Both are
-  guesses at what those controls should do here; the owner has not said.
+- Tune opens a sheet of the calendar's own settings, after School Planner's:
+  a layout row of four sketched screens, one per view, then theme and
+  weekends. Not the Settings screen. Done. The three dots hold Sync now and
+  Semesters, which is still a guess.
 - The today marker in the day strip is a true circle, like the circled "21".
 
 ### Theme

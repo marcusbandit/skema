@@ -206,16 +206,20 @@ fun <T> Segmented(
     }
 }
 
-/** A surface card. The only place the card radius is named. */
+/**
+ * A card. The only place the card radius is named. Surface on the page;
+ * sunken when the card itself sits on a surface, such as inside a sheet.
+ */
 @Composable
 fun Card(
     modifier: Modifier = Modifier,
     padding: PaddingValues = PaddingValues(Space.medium),
+    background: Color = skema.surface,
     content: @Composable () -> Unit,
 ) {
     Box(
         modifier
-            .background(skema.surface, SquircleShape(Radius.card))
+            .background(background, SquircleShape(Radius.card))
             .padding(padding)
     ) { content() }
 }
