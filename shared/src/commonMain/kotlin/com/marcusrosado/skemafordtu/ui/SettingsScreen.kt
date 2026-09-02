@@ -1,5 +1,14 @@
 package com.marcusrosado.skemafordtu.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,34 +45,61 @@ import com.marcusrosado.skemafordtu.ics.Terms
 import kotlinx.coroutines.launch
 import kotlinx.datetime.LocalDate
 
+/**
+ * Settings, and the subjects list it opens.
+ *
+ * Every row here used to carry a paragraph explaining how the setting was
+ * built, which is a commit message rather than a label. A setting says what it
+ * does, or says nothing when the title already did.
+ *
+ * Subjects were the other half of the problem: fifteen courses, each with a
+ * swatch, a status line and a hue strip, filled the screen and buried
+ * everything else. They live on their own screen now, reached by one row.
+ */
 @Composable
 fun SettingsScreen(model: SkemaModel) {
+    val reduced = reducedMotion()
+    var subjects by remember { mutableStateOf(false) }
+
+    // Back leaves one level at a time. Without this the gesture closed the
+    // whole app from here, because nothing on the stack had claimed it. The
+    // subjects screen claims it in turn while it is up, so this one stands
+    // down and the two never both answer.
+    BackHandler(enabled = !subjects) { model.screen = Screen.Calendar }
+
+    AnimatedContent(
+        targetState = subjects,
+        modifier = Modifier.fillMaxSize(),
+        // Opening subjects is a step inwards and leaving is a step back out,
+        // the same grow-in shrink-out pair the calendar uses to change view.
+        transitionSpec = {
+            val transform = if (reduced) {
+                fadeIn(tween(Motion.FADE)) togetherWith fadeOut(tween(Motion.FADE))
+            } else {
+                val deeper = targetState
+                val from = if (deeper) 1f - Motion.VIEW_SCALE else 1f + Motion.VIEW_SCALE
+                val to = if (deeper) 1f + Motion.VIEW_SCALE else 1f - Motion.VIEW_SCALE
+                val enter = tween<Float>(Motion.VIEW_IN, easing = Motion.arrive)
+                val exit = tween<Float>(Motion.VIEW_OUT, easing = Motion.leave)
+                (fadeIn(enter) + scaleIn(enter, initialScale = from)) togetherWith
+                    (fadeOut(exit) + scaleOut(exit, targetScale = to))
+            }
+            transform using SizeTransform(clip = false)
+        },
+        label = "settings",
+    ) { open ->
+        if (open) {
+            SubjectsScreen(model, onBack = { subjects = false })
+        } else {
+            SettingsList(model, onSubjects = { subjects = true })
+        }
+    }
+}
+
+@Composable
+private fun SettingsList(model: SkemaModel, onSubjects: () -> Unit) {
     val c = skema
     val scope = rememberCoroutineScope()
-
-    // Keyed on the raw feed and on the two settings that decide what is
-    // visible, because reading model.visible runs the merge and a key you
-    // have to compute first is not a key.
-    val semesters = remember(
-        model.events,
-        model.settings.collapseDuplicates,
-        model.settings.enrolledFrom,
-    ) {
-        model.terms.map { term -> term to subjectsOf(model.eventsIn(term)) }
-    }
-
-    // Oldest semester first, which is the order the palette wants: a term is
-    // coloured around whatever the terms before it already took, so passing
-    // this autumn first would re-roll every older term the day a course is
-    // added. The palette is rebuilt whenever a hue is pinned or released, so
-    // every row below shows the redraw that pinning caused.
-    val palette = remember(semesters, model.settings.courseHues, c.isDark) {
-        CoursePalette.bySemester(
-            semesters.map { (_, subjects) -> subjects.map { it.code } },
-            model.settings.courseHues,
-            c.isDark,
-        )
-    }
 
     Column(
         Modifier
@@ -89,7 +125,7 @@ fun SettingsScreen(model: SkemaModel) {
         }
 
         Spacer(Modifier.height(Space.large))
-        SectionLabel("Calendar link", Ico.Link)
+        SectionLabel("Feed", Ico.Link)
 
         Card(Modifier.fillMaxWidth()) {
             Column {
@@ -98,11 +134,7 @@ fun SettingsScreen(model: SkemaModel) {
                     onValueChange = { url -> model.update { it.copy(feedUrl = url.trim()) } },
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = {
-                        Text(
-                            "https://learn.inside.dtu.dk/d2l/le/calendar/feed/user/feed.ics?token=",
-                            color = c.inkMuted,
-                            fontSize = Type.small,
-                        )
+                        Text("Paste the link", color = c.inkMuted, fontSize = Type.small)
                     },
                     singleLine = false,
                     shape = SquircleShape(Radius.chip),
@@ -113,16 +145,12 @@ fun SettingsScreen(model: SkemaModel) {
                 )
 
                 Spacer(Modifier.height(Space.small))
+                // Where to find it, and the one thing about it worth a
+                // warning: the token needs no login, so the link is a
+                // password whether or not it looks like one.
                 Text(
-                    "In DTU Learn open the Calendar, press Subscribe, and copy the address it gives you.",
+                    "DTU Learn, Calendar, Subscribe. The link needs no login, so keep it private.",
                     color = c.inkMuted,
-                    fontSize = Type.small,
-                )
-
-                Spacer(Modifier.height(Space.small))
-                Text(
-                    "Treat this link like a password. The token in it reads your whole calendar with no login, so do not paste it into a chat or a repo.",
-                    color = c.accentStrong,
                     fontSize = Type.small,
                 )
 
@@ -155,9 +183,7 @@ fun SettingsScreen(model: SkemaModel) {
             }
         }
 
-        Spacer(Modifier.height(Space.large))
-        SectionLabel("When you started", Ico.Day)
-
+        Spacer(Modifier.height(Space.small))
         EnrolmentSection(model)
 
         Spacer(Modifier.height(Space.large))
@@ -186,9 +212,8 @@ fun SettingsScreen(model: SkemaModel) {
                 }
                 Divider()
                 Toggle(
-                    title = "Show Saturday and Sunday",
+                    title = "Show weekends",
                     ico = Ico.Month,
-                    detail = "A teaching week runs Monday to Friday, so the weekend is left out and its width goes to the five days that hold something.",
                     checked = model.settings.showWeekend,
                     onChange = { v -> model.update { it.copy(showWeekend = v) } },
                 )
@@ -196,56 +221,26 @@ fun SettingsScreen(model: SkemaModel) {
                 Toggle(
                     title = "Fold duplicate entries",
                     ico = Ico.Fold,
-                    detail = "DTU lists most classes twice, once written by a teacher and once generated from the room booking. Merge the pair field by field: where the two differ the teacher's entry wins, and where it says nothing the booking fills in, which is how the rooms survive.",
+                    detail = "Merge the duplicate entries DTU sends",
                     checked = model.settings.collapseDuplicates,
                     onChange = { v -> model.update { it.copy(collapseDuplicates = v) } },
                 )
-            }
-        }
-
-        Spacer(Modifier.height(Space.large))
-        SectionLabel("Subjects", Ico.Palette)
-
-        Card(Modifier.fillMaxWidth(), PaddingValues(Space.small)) {
-            Column {
-                Text(
-                    if (semesters.isEmpty()) {
-                        "Courses turn up here after a sync."
-                    } else {
-                        "Colours are drawn at random within a semester, each one kept a set distance from the others that term. Two semesters may land on the same colour, since they never share a screen. Drag a strip to choose one yourself."
-                    },
-                    color = c.inkMuted,
-                    fontSize = Type.small,
-                    modifier = Modifier.padding(Space.small),
+                Divider()
+                // The way in to the colours. A row that opens a list is a
+                // list affordance, so it stays a row rather than growing a
+                // button of its own.
+                NavRow(
+                    title = "Subjects",
+                    value = if (model.courseCount == 0) "none" else model.courseCount.toString(),
+                    ico = Ico.Palette,
+                    trailing = Ico.Forward,
+                    onClick = onSubjects,
                 )
-                // Newest semester at the top: the term being taught is the
-                // one worth reaching, and the ones under it are history. A
-                // course taught twice appears under both, wearing the one
-                // colour it was given.
-                semesters.asReversed().forEach { (term, subjects) ->
-                    val peers = subjects.map { it.code }
-                    Divider()
-                    SectionLabel(
-                        term.label,
-                        modifier = Modifier.padding(top = Space.small, start = Space.tight),
-                    )
-                    subjects.forEachIndexed { index, subject ->
-                        if (index > 0) Divider()
-                        CourseColorRow(
-                            code = subject.code,
-                            label = subject.label,
-                            palette = palette,
-                            peers = peers,
-                            pinned = model.settings.courseHues[subject.code],
-                            onPick = { hue -> model.setHue(subject.code, hue) },
-                        )
-                    }
-                }
             }
         }
 
         Spacer(Modifier.height(Space.large))
-        SectionLabel("What is cached", Ico.Storage)
+        SectionLabel("Storage", Ico.Storage)
 
         Card(Modifier.fillMaxWidth()) {
             Column {
@@ -256,7 +251,7 @@ fun SettingsScreen(model: SkemaModel) {
                 Fact("Stored in", model.storageLocation)
 
                 Spacer(Modifier.height(Space.medium))
-                PillButton("Forget the cached calendar", { model.forget() }, ico = Ico.Trash)
+                PillButton("Delete the cache", { model.forget() }, ico = Ico.Trash)
             }
         }
 
@@ -266,11 +261,7 @@ fun SettingsScreen(model: SkemaModel) {
 
 /**
  * A section heading. The glyph is what makes a wall of settings scannable:
- * you find the link section by its shape long before you have read the word.
- *
- * The semester headings inside the subjects card pass no glyph. They sit
- * under one that is already there, and a second row of icons two steps in
- * would be decoration rather than a way to find anything.
+ * you find the feed section by its shape long before you have read the word.
  */
 @Composable
 private fun SectionLabel(text: String, ico: Ico? = null, modifier: Modifier = Modifier) {
@@ -308,13 +299,17 @@ private fun Picker(title: String, ico: Ico, content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * A switch with a title, and a line under it only where the title leaves a
+ * real question open. Most do not.
+ */
 @Composable
 private fun Toggle(
     title: String,
-    detail: String,
     checked: Boolean,
     onChange: (Boolean) -> Unit,
     ico: Ico,
+    detail: String? = null,
 ) {
     val c = skema
     Row(
@@ -322,20 +317,55 @@ private fun Toggle(
         verticalAlignment = Alignment.Top,
     ) {
         // The glyphs line up in a column of their own, so the titles start on
-        // one edge whatever shape sits beside them.
-        // Centred in a box one type step tall, so the glyph lands on the
-        // title's line rather than riding above it.
+        // one edge whatever shape sits beside them. Centred in a box one type
+        // step tall, so the glyph lands on the title's line.
         Box(Modifier.height(Space.large), contentAlignment = Alignment.Center) {
             Glyph(ico, tint = c.inkMuted)
         }
         Spacer(Modifier.width(Space.small))
         Column(Modifier.weight(1f)) {
             Text(title, color = c.ink, fontSize = Type.normal, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(2.dp))
-            Text(detail, color = c.inkMuted, fontSize = Type.small)
+            if (detail != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(detail, color = c.inkMuted, fontSize = Type.small)
+            }
         }
         Spacer(Modifier.width(Space.small))
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/**
+ * A row that goes somewhere: its current value on the right, and a glyph
+ * saying whether the thing opens in place or on a screen of its own.
+ */
+@Composable
+private fun NavRow(
+    title: String,
+    value: String,
+    ico: Ico,
+    trailing: Ico,
+    onClick: () -> Unit,
+) {
+    val c = skema
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(Space.small),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.height(Space.large), contentAlignment = Alignment.Center) {
+            Glyph(ico, tint = c.inkMuted)
+        }
+        Spacer(Modifier.width(Space.small))
+        Text(
+            title,
+            color = c.ink,
+            fontSize = Type.normal,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
+        Text(value, color = c.inkMuted, fontSize = Type.small)
+        Spacer(Modifier.width(Space.tight))
+        Glyph(trailing, tint = c.inkMuted, size = IconSizeQuiet)
     }
 }
 
@@ -359,119 +389,89 @@ private fun Divider() {
     )
 }
 
-/** One course as the settings list shows it: the code, and everything else. */
-private data class Subject(val code: String, val label: String)
-
-private fun subjectsOf(events: List<CalendarEvent>): List<Subject> {
-    val counts = events.mapNotNull { it.courseCode }.groupingBy { it }.eachCount()
-    return counts.keys.sorted().map { code ->
-        val entries = counts.getValue(code)
-        val tail = if (entries == 1) "1 entry" else entries.toString() + " entries"
-        Subject(code, listOfNotNull(nameOf(events, code), tail).joinToString(SEPARATOR))
-    }
-}
-
-/**
- * The course's name, tidied.
- *
- * textFor is asked for the room booking shape on purpose: that is the branch
- * that returns the course name as the title, with the term suffix that
- * repeats on every single entry and the leading code already stripped off.
- * Asking it saves duplicating that trimming here, where it would drift.
- */
-private fun nameOf(events: List<CalendarEvent>, code: String): String? {
-    val named = events.firstOrNull {
-        it.courseCode == code && !it.location.courseName.isNullOrBlank()
-    } ?: return null
-    return textFor(named.summary, named.location.courseName, code, fromRoomBooking = true)
-        .title
-        .takeIf { it.isNotBlank() }
-}
-
 /**
  * The enrolment date: which end of the feed is actually yours.
  *
- * DTU's feed is the university's record rather than the student's. This one
- * reaches back to 2019, and the entries down there belong to whoever else
- * shares the org unit; they take up month cells and they take hues off the
- * course palette. Naming the day you arrived is the whole fix.
+ * DTU's feed is the university's record rather than the student's, so it
+ * reaches back years before you arrived and those entries take up month cells
+ * and course colours. One row, and the month grid only once it is asked for.
  */
 @Composable
 private fun EnrolmentSection(model: SkemaModel) {
     val c = skema
     val from = model.enrolledFrom
     val suggested = model.suggestedEnrolment
-    val total = model.events.size
 
     // Counted on the raw feed rather than as events minus visible. Merging
     // folds DTU's duplicate pairs into single entries, so that difference
     // would be two effects added together and honest about neither.
     val hidden = remember(model.events, from) { countBefore(model.events, from) }
-    val ifSuggested = remember(model.events, suggested) { countBefore(model.events, suggested) }
-
     val years = remember(model.events, from, suggested) {
         yearsCovered(model.events, listOfNotNull(from, suggested))
     }
 
     var picking by remember { mutableStateOf(false) }
 
-    Card(Modifier.fillMaxWidth()) {
-        Column {
-            Text(
-                "The feed reaches further back than you do. Anything dated before this day is left out of the calendar and out of the course colours.",
-                color = c.inkMuted,
-                fontSize = Type.small,
+    // The picker is the shallower thing on screen, so back closes it before
+    // it closes the settings under it.
+    BackHandler(enabled = picking) { picking = false }
+
+    Card(Modifier.fillMaxWidth(), PaddingValues(Space.small)) {
+        Column(
+            Modifier.animateContentSize(tween(Motion.VIEW_IN, easing = Motion.arrive))
+        ) {
+            NavRow(
+                title = "Starting from",
+                value = if (from == null) "everything" else monthLong(from.month) + " " + from.year,
+                ico = Ico.Day,
+                trailing = if (picking) Ico.Collapse else Ico.Expand,
+                onClick = { picking = !picking },
             )
-
-            Spacer(Modifier.height(Space.small))
-            Text(
-                if (from == null) "Showing everything the feed holds" else "Starting from " + dateLabel(from),
-                color = c.ink,
-                fontSize = Type.normal,
-                fontWeight = FontWeight.Medium,
-            )
-
-            Spacer(Modifier.height(Space.unit))
-            Text(
-                effectOf(total, from, hidden, suggested, ifSuggested),
-                color = c.inkMuted,
-                fontSize = Type.small,
-            )
-
-            // The feed states its own semesters, so the date is offered by the
-            // name of the term it opens. Asking someone to remember a date the
-            // feed already knows is the rude version of this control.
-            if (suggested != null && suggested != from) {
-                Spacer(Modifier.height(Space.medium))
-                PillButton(
-                    "Start at " + Terms.of(suggested).label,
-                    { model.update { it.copy(enrolledFrom = suggested.toString()) } },
-                    filled = true,
-                    ico = Ico.Check,
-                )
-            }
-
-            Spacer(Modifier.height(Space.small))
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
-                PillButton(
-                    if (picking) "Close" else "Pick a month",
-                    { picking = !picking },
-                    ico = if (picking) Ico.Collapse else Ico.Expand,
-                )
-                if (from != null) {
-                    PillButton(
-                        "Show everything",
-                        { model.update { it.copy(enrolledFrom = null) } },
-                        ico = Ico.Reset,
-                    )
-                }
-            }
 
             if (picking) {
-                Spacer(Modifier.height(Space.medium))
-                EnrolmentPicker(years, from) { date ->
-                    model.update { it.copy(enrolledFrom = date.toString()) }
-                    picking = false
+                Divider()
+                Column(Modifier.padding(Space.small)) {
+                    EnrolmentPicker(years, from) { date ->
+                        model.update { it.copy(enrolledFrom = date.toString()) }
+                        picking = false
+                    }
+
+                    Spacer(Modifier.height(Space.small))
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.small)) {
+                        // The feed states its own semesters, so the date is
+                        // offered by the name of the term it opens rather
+                        // than asking anyone to remember it.
+                        if (suggested != null && suggested != from) {
+                            PillButton(
+                                Terms.of(suggested).label,
+                                {
+                                    model.update { it.copy(enrolledFrom = suggested.toString()) }
+                                    picking = false
+                                },
+                                filled = true,
+                                ico = Ico.Check,
+                            )
+                        }
+                        if (from != null) {
+                            PillButton(
+                                "Everything",
+                                {
+                                    model.update { it.copy(enrolledFrom = null) }
+                                    picking = false
+                                },
+                                ico = Ico.Reset,
+                            )
+                        }
+                    }
+
+                    if (from != null && hidden > 0) {
+                        Spacer(Modifier.height(Space.small))
+                        Text(
+                            "Hides $hidden older entries",
+                            color = c.inkMuted,
+                            fontSize = Type.small,
+                        )
+                    }
                 }
             }
         }
@@ -590,28 +590,3 @@ private fun yearsCovered(events: List<CalendarEvent>, marks: List<LocalDate>): I
     val years = events.map { it.start.date.year } + marks.map { it.year } + today().year
     return years.min()..years.max()
 }
-
-/**
- * What the setting does to the feed, in numbers that are true.
- *
- * The count is of raw entries older than the date, which is exactly what the
- * date decides. Quoting the drop from events to visible instead would fold in
- * the duplicate merge, and report a number that belongs to neither setting.
- */
-private fun effectOf(
-    total: Int,
-    from: LocalDate?,
-    hidden: Int,
-    suggested: LocalDate?,
-    ifSuggested: Int,
-): String = when {
-    total == 0 -> "Nothing is cached yet, so there is nothing to leave out."
-    from != null && hidden == 0 -> "Nothing in the feed is older than that."
-    from != null -> "Leaving out $hidden of the ${countLabel(total)} the feed holds."
-    suggested != null && ifSuggested > 0 ->
-        "Starting at ${Terms.of(suggested).label} would leave out $ifSuggested of the " +
-            "${countLabel(total)} the feed holds."
-    else -> "Every entry the feed holds is on screen."
-}
-
-private fun countLabel(n: Int): String = if (n == 1) "1 entry" else "$n entries"

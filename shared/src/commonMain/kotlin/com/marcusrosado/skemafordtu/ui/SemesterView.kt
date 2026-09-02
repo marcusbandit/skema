@@ -2,14 +2,18 @@ package com.marcusrosado.skemafordtu.ui
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,11 +51,14 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.marcusrosado.skemafordtu.ics.CalendarEvent
 import com.marcusrosado.skemafordtu.ics.Term
-import com.marcusrosado.skemafordtu.ics.Terms
+import com.marcusrosado.skemafordtu.ics.spanMinutes
+import kotlinx.coroutines.launch
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /**
  * The degree, one semester at a time.
@@ -78,6 +86,14 @@ fun SemesterView(model: SkemaModel, palette: CoursePalette, modifier: Modifier =
     // a sync drops the last entry of a term. Falling back to the list beats
     // drawing a week built out of nothing.
     LaunchedEffect(terms) { if (open != null && open !in terms) open = null }
+
+    // Back unwinds one level at a time, innermost first. Exactly one of these
+    // is live at any moment, which is what orders them: inside a semester it
+    // is the semester that gives way, and only the bare list hands the app
+    // back to the calendar. Without this the gesture closed skema outright,
+    // because nothing on this screen had claimed it.
+    BackHandler(enabled = open != null) { open = null }
+    BackHandler(enabled = open == null) { model.screen = Screen.Calendar }
 
     Column(modifier.fillMaxSize().background(c.background)) {
         Row(
@@ -108,21 +124,25 @@ fun SemesterView(model: SkemaModel, palette: CoursePalette, modifier: Modifier =
 
         AnimatedContent(
             targetState = open,
-            modifier = Modifier.fillMaxSize(),
-            // Opening a semester is a step inwards, closing one a step back
-            // out, and the motion says which: the same grow-in, shrink-out
-            // pair the calendar uses when it changes view.
+            // Clipped, because the two panes cross sideways and neither may
+            // paint over the header they are moving underneath.
+            modifier = Modifier.fillMaxSize().clipToBounds(),
+            // A semester arrives from the right and leaves back to the right,
+            // which is the direction [SwipeBack] takes it. The gesture and the
+            // transition are then one movement rather than two ideas about
+            // what going back looks like. Timings are [Motion]'s view pair,
+            // the same one the calendar swaps views with.
             transitionSpec = {
                 val transform = if (reduced) {
                     fadeIn(tween(Motion.FADE)) togetherWith fadeOut(tween(Motion.FADE))
                 } else {
-                    val deeper = targetState != null
-                    val from = if (deeper) 1f - Motion.VIEW_SCALE else 1f + Motion.VIEW_SCALE
-                    val to = if (deeper) 1f + Motion.VIEW_SCALE else 1f - Motion.VIEW_SCALE
-                    val enter = tween<Float>(Motion.VIEW_IN, easing = Motion.arrive)
-                    val exit = tween<Float>(Motion.VIEW_OUT, easing = Motion.leave)
-                    (fadeIn(enter) + scaleIn(enter, initialScale = from)) togetherWith
-                        (fadeOut(exit) + scaleOut(exit, targetScale = to))
+                    val inwards = if (targetState != null) 1 else -1
+                    val enter = tween<IntOffset>(Motion.VIEW_IN, easing = Motion.arrive)
+                    val exit = tween<IntOffset>(Motion.VIEW_OUT, easing = Motion.leave)
+                    (slideInHorizontally(enter) { inwards * it } +
+                        fadeIn(tween(Motion.VIEW_IN))) togetherWith
+                        (slideOutHorizontally(exit) { -inwards * it } +
+                            fadeOut(tween(Motion.VIEW_OUT)))
                 }
                 transform using SizeTransform(clip = false)
             },
@@ -131,9 +151,72 @@ fun SemesterView(model: SkemaModel, palette: CoursePalette, modifier: Modifier =
             if (term == null) {
                 TermList(model, palette, terms, onOpen = { open = it })
             } else {
-                TermWeek(model, palette, term)
+                SwipeBack(onBack = { open = null }) { TermWeek(model, palette, term) }
             }
         }
+    }
+}
+
+/**
+ * How far a pane has to be dragged sideways before letting go means back.
+ * A share of the pane rather than a distance, so the phone and a wide desktop
+ * window ask for the same gesture instead of the same number of pixels.
+ */
+private const val BACK_COMMIT = 0.28f
+
+/**
+ * Drag right to leave a semester, with the pane under the finger the whole
+ * way.
+ *
+ * Leaving a semester is a gesture as well as the control in the header. The
+ * drag is on the whole pane rather than on an edge strip, so there is no
+ * narrow band to hunt for, and it needs no rule of its own about when to keep
+ * out of the way: everything that scrolls inside
+ * the typical week is a descendant of this, and a descendant sees a drag
+ * first. A vertical drag reaches the grid, a sideways one reaches the columns
+ * whenever the columns have somewhere left to go, and this only ever gets what
+ * nothing inside wanted.
+ *
+ * A release either commits, and the pane's exit transition carries it the rest
+ * of the way out from wherever the finger left it, or springs home on
+ * [Motion.settle]. Nothing jumps and nothing snaps.
+ */
+@Composable
+private fun SwipeBack(onBack: () -> Unit, content: @Composable () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val feel = LocalFeel.current
+    val flick = with(LocalDensity.current) { FLICK.toPx() }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val travel = constraints.maxWidth.toFloat()
+        val pushed = remember { Animatable(0f) }
+        val drag = rememberDraggableState { dx ->
+            // Rightwards only: there is nothing to the pane's left to reveal
+            // until it has left, and a pane that can be dragged the wrong way
+            // offers a move that does nothing.
+            scope.launch { pushed.snapTo((pushed.value + dx).coerceIn(0f, travel)) }
+        }
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .offset { IntOffset(pushed.value.roundToInt(), 0) }
+                .draggable(
+                    state = drag,
+                    orientation = Orientation.Horizontal,
+                    onDragStopped = { velocity ->
+                        // Velocity beats position, so a flick goes back
+                        // however far it actually travelled. The threshold is
+                        // the sheet's, so a throw means the same everywhere.
+                        if (velocity > flick || pushed.value > travel * BACK_COMMIT) {
+                            feel.thud()
+                            onBack()
+                        } else {
+                            pushed.animateTo(0f, Motion.settle)
+                        }
+                    },
+                ),
+        ) { content() }
     }
 }
 
@@ -251,31 +334,26 @@ private fun SubjectChips(subjects: List<TermSubject>, palette: CoursePalette, mo
 /** One semester: its subjects, then the week it usually runs. */
 @Composable
 private fun TermWeek(model: SkemaModel, palette: CoursePalette, term: Term) {
+    // One list for the whole pane: the merged, enrolment-filtered entries the
+    // calendar itself draws and the header counts.
+    //
+    // The week used to be built from the raw feed instead, to dodge a merge
+    // that folded a zero length "m02-solutions - Available" marker into the
+    // lecture it sat on and inherited its empty end, which the grid clamped to
+    // midnight and drew as eleven hours. That is fixed underneath, in
+    // Dedup.Slot: entries now have to agree about length before they count as
+    // one class. With the merge honest again there is no reason for this
+    // screen to disagree with the rest of the app about what an entry is, and
+    // the merged list is what gives a block every room both sides of a pair
+    // named rather than only the winner's.
+    //
+    // Reading merged rather than raw cannot double a course up either: the
+    // grouping below folds a course's entries at one weekday and time into one
+    // slot, so a class written down twice was one block whichever list it came
+    // from.
     val events = remember(model.visible, term) { model.eventsIn(term) }
     val subjects = remember(events) { subjectsIn(events) }
-
-    // The week is built from the feed's own entries rather than from the
-    // merged cards the calendar draws, and the merge is why.
-    //
-    // A slot is keyed on the start time alone, and a slot holding one course
-    // is treated as that course listed twice, so a hand-made entry that opens
-    // on the hour a class starts is merged INTO the class and the merged card
-    // takes the hand-made end: a 13:00 lecture and a "Week 2 - Available"
-    // window that opens at 13:00 and closes at 23:59 come out as one eleven
-    // hour block. Merged, that block is indistinguishable from a class, and
-    // dropping it would take the lecture with it. Unmerged, they are two
-    // entries again, one with a room and a four hour booking and one without,
-    // and [eligible] can tell them apart. Nothing is shown twice, because the
-    // grouping below folds a course's entries at one weekday and time into one
-    // slot whatever they came from.
-    //
-    // The enrolment filter is applied the way the model applies it, so the
-    // week never contains a semester's entries from before the student.
-    val from = model.enrolledFrom
-    val entries = remember(model.events, term, from) {
-        model.events.filter { Terms.of(it) == term && (from == null || it.start.date >= from) }
-    }
-    val slots = remember(entries) { typicalWeek(entries) }
+    val slots = remember(events) { typicalWeek(events) }
 
     Column(Modifier.fillMaxSize()) {
         if (subjects.isNotEmpty()) {
@@ -483,6 +561,11 @@ private fun WeekdayHeading(label: String, width: Dp) {
  * end, so the third block is the last one drawn and the rest become a tag
  * saying how many there are. The tag opens the stack for the reader who wants
  * it, which keeps the cap a default rather than a wall.
+ *
+ * Measured on the real Fall 2025 feed the cap fires in one place, the four
+ * deep Wednesday morning, which is about the rate it should fire at: often
+ * enough to be doing something, seldom enough that the week is still being
+ * drawn rather than counted.
  */
 private const val MAX_STACK = 3
 
@@ -732,16 +815,18 @@ private data class Slot(
 
 private data class SlotKey(val dayIndex: Int, val startMinute: Int, val course: String?)
 
-/** An entry's length in minutes, which is the axis both the grid and the filter work on. */
-private fun CalendarEvent.lengthMinutes(): Int = endMinute() - startMinute()
-
 /**
  * What is allowed to become part of a typical week.
  *
- * Three tests, in the order of how much each can be trusted.
+ * Two rules, and each asks something about the entry in front of it rather
+ * than about the term around it.
  *
- * Whole day entries go first. They carry no time to plot, and the grid is a
- * clock.
+ * First, what a clock cannot draw. A whole day entry states no time. An entry
+ * whose DTEND equals its DTSTART states, explicitly, that it is a moment and
+ * not a session, which is what DTU's "... - Available" markers are;
+ * [endMinute] has to clamp that empty end to midnight, so drawing one invents
+ * the rest of the day out of nothing. Neither is a class, and neither leaves
+ * the grid a span to plot.
  *
  * Then the booking test. DTU generates an entry from every room booking, and
  * those generated entries ARE the timetable; a good share of the hand-made
@@ -752,48 +837,22 @@ private fun CalendarEvent.lengthMinutes(): Int = endMinute() - startMinute()
  * this". It is applied per COURSE and not across the term: a course with no
  * booked entry anywhere in the semester is taught somewhere the feed never
  * names, and dropping it would delete a real subject from the week rather than
- * tidy it up, so a course like that keeps everything and leans on length
- * alone.
+ * tidy it up, so a course like that keeps everything.
  *
- * Then length, which catches what the booking test cannot: a course with no
- * bookings to compare against, and a booking genuinely held all day.
+ * A Tukey fence on duration used to follow these two. It has gone, because it
+ * was not earning the lines it took: on the owner's Fall 2025 it cut nothing
+ * the booking test had not already cut, and the one marker that did get past
+ * the booking test, a 17:00 "Week 2 - Available", ran to 420 minutes against a
+ * fence of exactly 420 and survived it anyway. The rule it was standing in for
+ * is the zero length one above, which says the same thing outright instead of
+ * hoping a quartile lands in the right place.
  */
 private fun eligible(events: List<CalendarEvent>): List<CalendarEvent> {
-    val timed = events.filterNot { it.allDay }
+    val timed = events.filterNot { it.allDay || (it.spanMinutes() ?: 60) <= 0 }
     if (timed.isEmpty()) return emptyList()
 
-    val booked = timed.filter { it.rooms.isNotEmpty() }
-    val hasBooking = booked.map { it.courseCode }.toSet()
-    val candidates = timed.filter { it.rooms.isNotEmpty() || it.courseCode !in hasBooking }
-
-    // Read off the bookings when there are any, since those are the lengths
-    // the university actually teaches in. A term with nothing booked has no
-    // such distribution, so it reads the fence off everything it has.
-    val fence = durationFence((if (booked.isNotEmpty()) booked else timed).map { it.lengthMinutes() })
-    return candidates.filter { it.lengthMinutes() <= fence }
-}
-
-/**
- * The longest an entry can run and still be a class.
- *
- * Tukey's fence, the third quartile plus one and a half interquartile ranges,
- * which is the standard cut for a long tail and needs no duration decided in
- * advance. On a normal DTU term the quartiles land on the university's own
- * module lengths, two hours and four, which puts the fence around seven: a
- * four hour lab is inside it, an eleven hour availability window is nowhere
- * near. A term that really does teach in eight hour blocks moves its own
- * quartiles and keeps them, which a fixed cap could not do.
- *
- * Quantiles are nearest rank, so a handful of entries degrades quietly: with
- * every duration equal the fence is that duration and nothing is cut.
- */
-private fun durationFence(minutes: List<Int>): Int {
-    if (minutes.isEmpty()) return Int.MAX_VALUE
-    val sorted = minutes.sorted()
-    fun rank(p: Double): Int = sorted[(p * sorted.size).toInt().coerceIn(0, sorted.size - 1)]
-    val low = rank(0.25)
-    val high = rank(0.75)
-    return high + (high - low) * 3 / 2
+    val hasBooking = timed.filter { it.rooms.isNotEmpty() }.map { it.courseCode }.toSet()
+    return timed.filter { it.rooms.isNotEmpty() || it.courseCode !in hasBooking }
 }
 
 /**
@@ -826,10 +885,10 @@ private const val TYPICAL_MINIMUM = 2
  * [eligible] decides what is even a candidate; this decides which candidates
  * recur. Entries are grouped by weekday, start time and course, and a group
  * survives when it landed in enough separate WEEKS. Weeks are counted rather
- * than entries because the feed lists the same class twice, once booked and
- * once written by hand, so counting entries would make a fortnightly class
- * look weekly, and because two entries in one week are one week's worth of
- * evidence about what an ordinary week looks like.
+ * than entries because two entries in one week are still one week's worth of
+ * evidence about what an ordinary week looks like, and because the feed can
+ * write the same class down twice at times close enough to read as one class
+ * and far enough apart for the merge to leave them alone.
  */
 private fun typicalWeek(events: List<CalendarEvent>): List<Slot> {
     val timed = eligible(events)

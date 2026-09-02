@@ -1,9 +1,9 @@
 package com.marcusrosado.skemafordtu.ui
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -12,8 +12,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -60,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import com.marcusrosado.skemafordtu.data.ViewMode
 import com.marcusrosado.skemafordtu.ics.CalendarEvent
 import com.marcusrosado.skemafordtu.ics.Season
+import com.marcusrosado.skemafordtu.ics.Terms
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -147,9 +146,9 @@ internal val FLICK = 400.dp
  * decides how the screen is divided.
  *
  * Two branches on size in the whole app and both are here. The first spends
- * width on the sidebar: wide enough and it is a rail that is always there,
- * otherwise a drawer that comes over the calendar when it is asked for. The
- * second spends what is left on panes. Both read the same model, so unfolding
+ * width on the sidebar: wide enough and it is a strip that is always there,
+ * otherwise the same strip parked off the left edge until it is pulled in.
+ * The second spends what is left on panes. Both read the same model, so unfolding
  * the phone moves the detail from a sheet into a rail and the menu from a
  * drawer into a strip, and changes nothing else: same day, same zoom, same
  * selection, no reload. That is what makes the fold seamless rather than a
@@ -193,24 +192,31 @@ fun CalendarShell(model: SkemaModel, palette: CoursePalette) {
         LaunchedEffect(railed) { if (railed) menuOpen = false }
 
         CompositionLocalProvider(LocalFrame provides frame) {
-            Row(Modifier.fillMaxSize()) {
-                if (railed) SidebarRail(model, Modifier.width(RAIL_WIDTH).fillMaxHeight())
-                Box(Modifier.weight(1f).fillMaxHeight()) {
-                    // A rail is already on screen, so the top bar gets a menu
-                    // control only when there is something to open.
-                    val onMenu = if (railed) null else ({ menuOpen = true })
-                    if (frame.dual) {
-                        DualPane(model, palette, frame, onMenu, onJump = { jumping = true })
-                    } else {
-                        SinglePane(model, palette, onMenu, onJump = { jumping = true })
+            if (railed) {
+                // The strip is always there, so it is simply a column of the
+                // layout and there is nothing to open.
+                Row(Modifier.fillMaxSize()) {
+                    SidebarRail(model, Modifier.width(RAIL_WIDTH).fillMaxHeight())
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        Panes(model, palette, frame, onJump = { jumping = true })
                     }
+                }
+            } else {
+                // The same strip, off to the left until it is pulled in. It
+                // pushes the calendar rather than covering it, so the frame
+                // the calendar measured itself against never changes.
+                SidebarScaffold(model, open = menuOpen, onOpenChange = { menuOpen = it }) {
+                    Panes(model, palette, frame, onJump = { jumping = true })
                 }
             }
         }
 
-        // Over the content rather than inside it: the drawer covers the top
-        // bar it was opened from, the way a drawer does.
-        SidebarDrawer(model, open = menuOpen, onDismiss = { menuOpen = false })
+        // No back handler for the picker here on purpose. The panel wires up
+        // its own, which registers later and therefore wins, and which goes
+        // out through the panel's exit animation. One here would only ever
+        // fire while that exit is already running, and all it could do is drop
+        // the panel mid slide, which is the exact jank the animation exists to
+        // avoid.
 
         // Composed only while it is wanted. The panel plays its own way out
         // before it calls back, which is why dismissing it is a callback and
@@ -250,12 +256,17 @@ private fun jumpYears(model: SkemaModel): IntRange {
     return marks.min()..marks.max()
 }
 
+/** One pane or two, which is a question about the frame and nothing else. */
+@Composable
+private fun Panes(model: SkemaModel, palette: CoursePalette, frame: Frame, onJump: () -> Unit) {
+    if (frame.dual) DualPane(model, palette, frame, onJump) else SinglePane(model, palette, onJump)
+}
+
 @Composable
 private fun DualPane(
     model: SkemaModel,
     palette: CoursePalette,
     frame: Frame,
-    onMenu: (() -> Unit)?,
     onJump: () -> Unit,
 ) {
     val c = skema
@@ -263,9 +274,14 @@ private fun DualPane(
     // capped so the week never loses the space it actually needs.
     val rail = (frame.width * 0.32f).coerceIn(260.dp, 380.dp)
 
+    // The detail has no close button any more, so back is what puts the rail
+    // back to the day it was showing. Disabled when nothing is picked, which
+    // is what lets the handler under it have the gesture instead.
+    BackHandler(enabled = model.picked != null) { model.picked = null }
+
     Row(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).fillMaxHeight()) {
-            TopBar(model, onMenu, onJump)
+            TopBar(model, onJump)
             Calendar(model, palette, Modifier.weight(1f))
         }
         Box(Modifier.width(1.dp).fillMaxHeight().background(c.hairline))
@@ -276,7 +292,6 @@ private fun DualPane(
                     event = picked,
                     tint = palette.tint(picked.courseCode),
                     conflict = picked.startEpochSeconds in model.conflicts,
-                    onClose = { model.picked = null },
                 )
             } else {
                 DaySummary(model, palette)
@@ -286,15 +301,10 @@ private fun DualPane(
 }
 
 @Composable
-private fun SinglePane(
-    model: SkemaModel,
-    palette: CoursePalette,
-    onMenu: (() -> Unit)?,
-    onJump: () -> Unit,
-) {
+private fun SinglePane(model: SkemaModel, palette: CoursePalette, onJump: () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(model, onMenu, onJump)
+            TopBar(model, onJump)
             Calendar(model, palette, Modifier.weight(1f))
         }
         // Always composed, never conditional: a sheet that is removed from
@@ -370,7 +380,7 @@ private fun CalendarBody(model: SkemaModel, palette: CoursePalette) {
 }
 
 @Composable
-private fun TopBar(model: SkemaModel, onMenu: (() -> Unit)?, onJump: () -> Unit) {
+private fun TopBar(model: SkemaModel, onJump: () -> Unit) {
     val c = skema
 
     // The headline is a date, and a date is somewhere you can go. Agenda is
@@ -379,14 +389,10 @@ private fun TopBar(model: SkemaModel, onMenu: (() -> Unit)?, onJump: () -> Unit)
 
     Column(Modifier.fillMaxWidth().padding(horizontal = Space.medium, vertical = Space.small)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Passed in rather than decided here, because whether there is
-            // anything to open is a question about the width of the window and
-            // the top bar only knows the width of its own pane.
-            if (onMenu != null) {
-                GlyphButton(Ico.Menu, "Views and settings", onMenu)
-                Spacer(Modifier.width(Space.small))
-            }
-
+            // No menu control here any more. It was a small glyph in the top
+            // corner, which is the furthest point on an unfolded phone from
+            // anywhere a thumb rests; the drawer's own handle sits down the
+            // left edge instead, where the gesture that opens it starts.
             Column(Modifier.weight(1f)) {
                 Row(
                     // Pulled back by its own padding, so the headline still
@@ -409,17 +415,17 @@ private fun TopBar(model: SkemaModel, onMenu: (() -> Unit)?, onJump: () -> Unit)
                         color = c.ink,
                         fontSize = Type.large,
                         fontWeight = FontWeight.SemiBold,
-                        // Months are never shortened, so a pair of names that
-                        // will not fit takes a second line instead. Two is the
-                        // ceiling by construction: a week spans at most two
-                        // months, so there are at most two names to print.
+                        // Nothing here is ever abbreviated, so a line that
+                        // will not fit takes a second one instead. The longest
+                        // this line gets is the countdown before a block
+                        // opens, and that is three weeks at most.
                         maxLines = 2,
                     )
                     if (jumpable) {
                         Spacer(Modifier.width(Space.tight))
                         // What makes a title read as a control rather than a
                         // label. It carries the description because the words
-                        // beside it name the month, not the action.
+                        // beside it say where you are, not what pressing does.
                         Glyph(
                             Ico.Expand,
                             tint = c.inkMuted,
@@ -463,14 +469,24 @@ private fun TopBar(model: SkemaModel, onMenu: (() -> Unit)?, onJump: () -> Unit)
     }
 }
 
+/** Where the detail sheet is allowed to come to rest, top to bottom. */
+private enum class Stop { Full, Partial, Gone }
+
 /**
  * The detail on a narrow frame.
  *
- * Three resting places: gone, about half the frame, and all of it. A drag
- * moves the sheet continuously and a release snaps to whichever stop it ended
- * up nearest, unless the release was still moving fast, in which case the
- * throw decides outright. That last rule is what makes a hard flick down
- * dismiss from near the top instead of stopping halfway.
+ * Three resting places and nothing in between: the whole frame, about half of
+ * it, and gone. A drag moves the panel continuously, and a release always
+ * lands on one of the three, animated. The old rule only settled the panel
+ * when something flung it, so a slow drag over the text let go of a sheet
+ * standing halfway up the screen and left it there.
+ *
+ * There is no close button and no fullscreen button. Up is bigger, down is
+ * gone, and every way out of this panel is the same downward slide: a drag, a
+ * tap on the calendar behind it, the back gesture, and picking a different
+ * event all set the same target and the panel travels there from wherever it
+ * happens to be. Nothing here is ever removed from the tree without moving
+ * first, which is what a sheet vanishing on the spot used to be.
  *
  * Deliberately not a ModalBottomSheet: that one brings Material's corner
  * shape, its scrim and its drag handle, and all three are somebody else's app.
@@ -485,19 +501,21 @@ private fun DetailSheet(model: SkemaModel, palette: CoursePalette) {
     val c = skema
     val picked = model.picked
 
-    // Held past the dismissal so there is still something to draw on the way
-    // out. model.picked is null the moment the sheet starts leaving, and an
-    // exit animation over nothing is a blank rectangle sliding down.
-    var shown by remember { mutableStateOf<CalendarEvent?>(null) }
-    val event = picked ?: shown
-    val open = picked != null
+    // Back closes the sheet before the drawer or the screen under it, and is
+    // disabled the moment the model lets go, so the rest of the way out is an
+    // animation rather than another thing back has to be pressed through.
+    BackHandler(enabled = picked != null) { model.picked = null }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val framePx = with(density) { maxHeight.toPx() }
         val flickPx = with(density) { FLICK.toPx() }
         val scope = rememberCoroutineScope()
-        val reduced = reducedMotion()
+
+        // Held past the dismissal so there is still something to draw on the
+        // way out. model.picked is null the moment the sheet starts leaving,
+        // and an exit animation over nothing is a blank rectangle sliding down.
+        var shown by remember { mutableStateOf<CalendarEvent?>(null) }
 
         // The panel's own content height, which is what lets the partial stop
         // be the content rather than half a screen with a band of empty
@@ -506,60 +524,109 @@ private fun DetailSheet(model: SkemaModel, palette: CoursePalette) {
         var contentPx by remember { mutableStateOf(0) }
         val restPx = if (contentPx > 0) min(framePx * PARTIAL, contentPx.toFloat()) else framePx * PARTIAL
 
-        val full = 0f
-        val partial = framePx - restPx
-        val gone = framePx
+        /** How far the panel's top edge sits below the top of the frame. */
+        fun positionOf(stop: Stop): Float = when (stop) {
+            Stop.Full -> 0f
+            Stop.Partial -> framePx - restPx
+            Stop.Gone -> framePx
+        }
 
-        var expanded by remember { mutableStateOf(false) }
+        var stop by remember { mutableStateOf(Stop.Gone) }
         var dragging by remember { mutableStateOf(false) }
+        val offset = remember { Animatable(framePx) }
 
-        // How far the panel's top edge sits below the top of the frame.
-        val offset = remember { Animatable(gone) }
-
-        LaunchedEffect(picked) {
-            if (picked != null) {
-                shown = picked
-                expanded = false
-                // The last sheet may have been left mid drag on its way out.
-                // Start this one from its resting place, not from that one's.
-                offset.snapTo(partial)
+        // What the model wants, turned into a stop. Nothing here animates:
+        // this decides where the panel belongs and the effect below is the
+        // only thing that ever moves it.
+        //
+        // Keyed on the stop as well, so it is re-asked every time the target
+        // moves. That is what makes it converge from anywhere: a finger that
+        // catches a panel mid exit leaves the model and the panel disagreeing,
+        // and this settles the argument on the next pass rather than leaving
+        // the sheet holding an event nobody picked.
+        LaunchedEffect(picked, shown, stop) {
+            when {
+                picked == null -> if (shown != null) stop = Stop.Gone
+                shown == null -> {
+                    shown = picked
+                    stop = Stop.Partial
+                }
+                // A different event while the sheet is up: out through the
+                // bottom first, and the pass after this one brings the new one
+                // back up. Swapping the text under a stationary panel is the
+                // one exit this sheet is not allowed to have.
+                shown != picked -> stop = Stop.Gone
+                else -> Unit
             }
         }
 
-        // A change of measured height is the layout catching up with itself
-        // rather than anything the user did, so it lands without motion. It
-        // happens on the frame after the first layout, while the panel is
-        // still below the screen on its way in.
-        LaunchedEffect(restPx) { if (!expanded && !dragging) offset.snapTo(framePx - restPx) }
+        // The one place the panel moves on its own.
+        //
+        // Keyed on the drag, so a release settles even when it lands on the
+        // stop it started from; on the measured height, so a panel that turns
+        // out to be shorter than half the frame slides to its true resting
+        // place instead of jumping there; and on the frame, so a fold or a
+        // rotation re-seats it. A drag interrupts this by snapping the same
+        // Animatable, which cancels this coroutine, which is exactly right: an
+        // exit a finger caught halfway is no longer an exit.
+        LaunchedEffect(stop, dragging, restPx, framePx) {
+            if (dragging) return@LaunchedEffect
+            val to = positionOf(stop)
+            if (offset.value != to) {
+                val spec: AnimationSpec<Float> = when {
+                    stop == Stop.Gone -> tween(Motion.SHEET_OUT, easing = Motion.leave)
+                    // Coming up from off the bottom edge is an arrival and
+                    // worth the longer curve; moving between two stops it can
+                    // already see is a settle.
+                    offset.value >= framePx -> tween(Motion.SHEET_IN, easing = Motion.arrive)
+                    else -> Motion.settle
+                }
+                offset.animateTo(to, spec)
+            }
+            // Only once the panel is all the way out does the event stop being
+            // drawn. Anything earlier is a disappearance.
+            if (stop == Stop.Gone) shown = null
+        }
 
         /** Moves the panel as far as it will go, and reports the part used. */
         fun take(dy: Float): Float {
             val from = offset.value
-            val to = (from + dy).coerceIn(full, gone)
+            val to = (from + dy).coerceIn(positionOf(Stop.Full), positionOf(Stop.Gone))
             if (to != from) scope.launch { offset.snapTo(to) }
             return to - from
         }
 
-        // Where a release lands. Velocity beats position past the flick
-        // threshold, so a throw goes where it was aimed however far the sheet
-        // had actually travelled; below it the nearest stop wins.
-        val land: suspend (Float) -> Unit = { velocity ->
-            val landing = when {
-                velocity > flickPx -> gone
-                velocity < -flickPx -> full
-                else -> listOf(full, partial, gone).minBy { abs(it - offset.value) }
-            }
-            if (landing == gone) {
-                // Hand the rest of the travel to the exit transition rather
-                // than animating there and then playing a second animation
-                // over the top of it.
-                model.picked = null
-            } else {
-                expanded = landing == full
-                offset.animateTo(landing, Motion.settle)
-            }
+        /**
+         * Where a release lands. Velocity beats position past the flick
+         * threshold, so a throw goes where it was aimed however far the sheet
+         * had actually travelled; below it the nearest stop wins, which is
+         * also what makes a release with no movement in it stay put.
+         */
+        fun landing(velocity: Float): Stop = when {
+            velocity > flickPx -> Stop.Gone
+            velocity < -flickPx -> Stop.Full
+            else -> Stop.entries.minBy { abs(positionOf(it) - offset.value) }
         }
-        val landNow by rememberUpdatedState(land)
+
+        fun settle(velocity: Float) {
+            // A panel the model has already let go of has one place left to
+            // be, whichever way the finger was going when it left the glass.
+            // Without this, catching a sheet on its way out and throwing it
+            // back up would leave it showing an event nothing has selected.
+            val next = if (model.picked == null) Stop.Gone else landing(velocity)
+            dragging = false
+            stop = next
+            // Dismissing by drag takes the same path as dismissing by back or
+            // by a tap outside: the model lets go, and the panel is already
+            // heading for the bottom edge by the time it hears about it.
+            if (next == Stop.Gone) model.picked = null
+        }
+
+        // The gesture code below outlives the composition that created it, so
+        // it reaches the current versions of these rather than the ones that
+        // were in scope when a finger first landed.
+        val takeNow by rememberUpdatedState({ dy: Float -> take(dy) })
+        val settleNow by rememberUpdatedState({ velocity: Float -> settle(velocity) })
 
         val drag = rememberDraggableState { dy -> take(dy) }
 
@@ -568,45 +635,60 @@ private fun DetailSheet(model: SkemaModel, palette: CoursePalette) {
         // one every sheet uses: upward, the sheet moves first and the text
         // only scrolls once the sheet has nowhere left to go; downward, the
         // text scrolls first and the sheet only moves once the text is back at
-        // its top. A fling that reaches either boundary carries over.
+        // its top.
         //
         // Without this the only draggable part of the sheet is the handle,
         // because a scroller claims the gesture whether or not it has anywhere
         // to scroll, and this detail usually has nowhere.
-        //
-        // Keyed on the frame height, since that is the one thing it closes
-        // over that a rotation changes.
-        val nested = remember(gone) {
+        val nested = remember {
             object : NestedScrollConnection {
-                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
-                    if (available.y < 0f) Offset(0f, take(available.y)) else Offset.Zero
+
+                /** Whether this gesture has actually moved the panel. */
+                private var moved = false
+
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (available.y >= 0f) return Offset.Zero
+                    val used = takeNow(available.y)
+                    if (used != 0f) moved = true
+                    return Offset(0f, used)
+                }
 
                 override fun onPostScroll(
                     consumed: Offset,
                     available: Offset,
                     source: NestedScrollSource,
-                ): Offset = if (available.y > 0f) Offset(0f, take(available.y)) else Offset.Zero
-
-                override suspend fun onPreFling(available: Velocity): Velocity {
-                    if (available.y >= 0f || offset.value <= full) return Velocity.Zero
-                    landNow(available.y)
-                    return available
+                ): Offset {
+                    if (available.y <= 0f) return Offset.Zero
+                    val used = takeNow(available.y)
+                    if (used != 0f) moved = true
+                    return Offset(0f, used)
                 }
 
-                override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                    if (available.y <= 0f) return Velocity.Zero
-                    landNow(available.y)
+                override suspend fun onPreFling(available: Velocity): Velocity = release(available)
+
+                override suspend fun onPostFling(
+                    consumed: Velocity,
+                    available: Velocity,
+                ): Velocity = release(available)
+
+                /**
+                 * The end of any gesture that moved the panel settles it, with
+                 * or without a fling behind it. Waiting for a fling was the
+                 * bug: a slow drag over the text ends with a velocity of
+                 * nearly nothing, and the sheet was left standing between two
+                 * stops until something else touched it.
+                 */
+                private fun release(available: Velocity): Velocity {
+                    if (!moved) return Velocity.Zero
+                    moved = false
+                    settleNow(available.y)
                     return available
                 }
             }
         }
 
         val ink = c.ink
-        AnimatedVisibility(
-            visible = open,
-            enter = fadeIn(tween(Motion.SHEET_FADE)),
-            exit = fadeOut(tween(Motion.SHEET_FADE)),
-        ) {
+        if (shown != null) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -615,7 +697,8 @@ private fun DetailSheet(model: SkemaModel, palette: CoursePalette) {
                         // full screen. A flat 0.32 read as the calendar being
                         // switched off; this only says which of the two layers
                         // is in front. Read in the draw phase, so a drag
-                        // repaints one rectangle instead of recomposing.
+                        // repaints one rectangle instead of recomposing, and
+                        // it reaches zero on its own as the panel leaves.
                         val openness = ((framePx - offset.value) / framePx).coerceIn(0f, 1f)
                         drawRect(ink, alpha = SCRIM_MAX * openness)
                     }
@@ -623,74 +706,49 @@ private fun DetailSheet(model: SkemaModel, palette: CoursePalette) {
             )
         }
 
-        AnimatedVisibility(
-            visible = open,
-            modifier = Modifier.fillMaxSize(),
-            // The slide starts exactly at the frame's bottom edge, so the
-            // panel enters from where it looks like it came from rather than
-            // from its own full height, which for a half open sheet would be
-            // twice the distance at twice the speed.
-            enter = slideInVertically(tween(Motion.SHEET_IN, easing = Motion.arrive)) {
-                if (reduced) 0 else restPx.roundToInt()
-            } + fadeIn(tween(Motion.SHEET_FADE)),
-            // Leaves from wherever the drag left it, so a dismissal that began
-            // as a gesture finishes as one continuous movement.
-            exit = slideOutVertically(tween(Motion.SHEET_OUT, easing = Motion.leave)) {
-                if (reduced) 0 else (framePx - offset.value).roundToInt()
-            } + fadeOut(tween(Motion.SHEET_FADE)),
-            label = "sheet",
+        Column(
+            Modifier
+                .fillMaxSize()
+                .offset { IntOffset(0, offset.value.roundToInt()) }
+                .clip(SquircleShape(Radius.sheet))
+                .background(c.surface)
+                .nestedScroll(nested)
+                .draggable(
+                    state = drag,
+                    orientation = Orientation.Vertical,
+                    onDragStarted = { dragging = true },
+                    onDragStopped = { velocity -> settle(velocity) },
+                ),
         ) {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .offset { IntOffset(0, offset.value.roundToInt()) }
-                    .clip(SquircleShape(Radius.sheet))
-                    .background(c.surface)
-                    .nestedScroll(nested)
-                    .draggable(
-                        state = drag,
-                        orientation = Orientation.Vertical,
-                        onDragStarted = { dragging = true },
-                        onDragStopped = { velocity ->
-                            dragging = false
-                            land(velocity)
-                        },
-                    ),
-            ) {
-                // Everything the panel actually contains, measured as one
-                // piece: this height is what the partial stop is capped to.
-                Column(Modifier.onSizeChanged { contentPx = it.height }) {
-                    // The grab strip. A whole row rather than the bar itself,
-                    // because the bar is 4dp tall and a thumb is not.
+            val event = shown
+            // Everything the panel actually contains, measured as one piece:
+            // this height is what the partial stop is capped to. Only reported
+            // while there is an event, so an empty panel on its way out does
+            // not tell the next one it is four pixels tall.
+            Column(Modifier.onSizeChanged { if (event != null) contentPx = it.height }) {
+                // The grab strip. A whole row rather than the bar itself,
+                // because the bar is 4dp tall and a thumb is not. It is the
+                // only thing left saying this panel is draggable, now that the
+                // two buttons that said it in words are gone.
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Space.medium),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Box(
                         Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = Space.medium),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(
-                            Modifier
-                                .width(Space.large + Space.medium)
-                                .height(Space.unit)
-                                .background(c.hairline, pillShape()),
-                        )
-                    }
-                    if (event != null) {
-                        EventDetail(
-                            event = event,
-                            tint = palette.tint(event.courseCode),
-                            conflict = event.startEpochSeconds in model.conflicts,
-                            onClose = { model.picked = null },
-                            expanded = expanded,
-                            onToggleExpand = {
-                                val next = !expanded
-                                expanded = next
-                                scope.launch {
-                                    offset.animateTo(if (next) full else partial, Motion.settle)
-                                }
-                            },
-                        )
-                    }
+                            .width(Space.large + Space.medium)
+                            .height(Space.unit)
+                            .background(c.hairline, pillShape()),
+                    )
+                }
+                if (event != null) {
+                    EventDetail(
+                        event = event,
+                        tint = palette.tint(event.courseCode),
+                        conflict = event.startEpochSeconds in model.conflicts,
+                    )
                 }
             }
         }
@@ -729,20 +787,27 @@ fun isoWeek(d: LocalDate): Int {
 }
 
 /**
- * A teaching week straddles a month boundary about once a month, and calling
- * the week of 31 August to 4 September "Aug" is wrong for four of its five
- * days. So the label is built from the days actually on screen and names both
- * months when there are two. The year moves to the subhead: it changes once a
- * year and it was the first thing to be truncated in the narrow pane.
+ * The date the two header lines are talking about.
  *
- * Both names are printed in full, always. There used to be a fallback that
- * measured the space and dropped one of the two months when the pair would
- * not fit on a line; it is gone. The longest pair a week can produce is
- * "September to October" at twenty characters, about 242dp at Type.large,
- * and the narrowest header in the app is the folded phone's, which after the
- * menu and today controls still has close to 300dp. So the pair fits, and on
- * the reading where it does not, the headline takes a second line rather than
- * telling you the wrong month.
+ * Day is anchored on the selected day rather than on the anchor, the same way
+ * the jump picker is, so the header names the day you can see. Everything
+ * else follows the anchor, which is what paging moves.
+ */
+private fun focusOf(model: SkemaModel): LocalDate =
+    if (model.view == ViewMode.Day) model.selected else model.anchor
+
+/**
+ * A teaching week straddles a month boundary about once a month, and calling
+ * the week of 31 August to 4 September "August" is wrong for four of its five
+ * days. So the label is built from the days actually on screen and names both
+ * months when there are two.
+ *
+ * Both names are printed in full, always, here and everywhere else in the app.
+ * There used to be a fallback that measured the space and dropped one of the
+ * two months when the pair would not fit; it is gone. This line is set at
+ * Type.small, where the longest pair a week can produce, "September to
+ * October", is about 130dp, and the narrowest header in the app has more than
+ * twice that.
  */
 private fun weekLabel(model: SkemaModel): String {
     val from = weekStart(model.anchor)
@@ -752,16 +817,40 @@ private fun weekLabel(model: SkemaModel): String {
     return monthLong(from.month) + " to " + monthLong(to.month)
 }
 
-private fun headline(model: SkemaModel): String = when (model.view) {
-    ViewMode.Month -> monthLong(model.anchor.month)
-    ViewMode.Week -> weekLabel(model)
-    ViewMode.Day -> relativeDay(model.selected) ?: dateLabel(model.selected)
-    ViewMode.Agenda -> "Agenda"
+/**
+ * The top line: which week of the block you are in.
+ *
+ * DTU teaches in thirteen week blocks and the whole university counts in
+ * them. A course says what is due in week 5, a reading list is written in
+ * them, and nobody says "the week of 5 October". So that is the headline, and
+ * the calendar's own week number moves down a line to the date.
+ *
+ * The count keeps rising past the block, which is honest arithmetic and a
+ * useless thing to print: "Semester week 19" is a week nobody has ever been
+ * told to turn up for. Past the teaching weeks it is the exam period and it
+ * says so. Before a block opens the count is zero or negative, which is a
+ * countdown rather than an error: week 0 is the week before teaching starts,
+ * so the weeks left over are always one more than the count is short.
+ */
+private fun semesterLine(date: LocalDate): String {
+    val week = Terms.semesterWeek(date)
+    return when {
+        week in 1..Terms.TEACHING_WEEKS -> "Semester week " + week
+        week > Terms.TEACHING_WEEKS -> "Exam period"
+        week == 0 -> "Semester starts next week"
+        else -> "Semester starts in " + (1 - week) + " weeks"
+    }
 }
 
-private fun subhead(model: SkemaModel): String = when (model.view) {
-    ViewMode.Month -> model.anchor.year.toString()
-    ViewMode.Week -> "Week " + isoWeek(model.anchor) + ", " + weekStart(model.anchor).year
-    ViewMode.Day -> "Week " + isoWeek(model.selected) + ", " + model.selected.year
-    ViewMode.Agenda -> "Everything ahead"
+private fun headline(model: SkemaModel): String = semesterLine(focusOf(model))
+
+/**
+ * The second line: the month, the real ISO week, then the year. The month
+ * comes first because it is the coarsest of the three and the one you read
+ * without meaning to; the year comes last because it changes once a year.
+ */
+private fun subhead(model: SkemaModel): String {
+    val focus = focusOf(model)
+    val months = if (model.view == ViewMode.Week) weekLabel(model) else monthLong(focus.month)
+    return months + ", week " + isoWeek(focus) + ", " + focus.year
 }

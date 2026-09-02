@@ -28,20 +28,18 @@ import com.marcusrosado.skemafordtu.ics.CalendarEvent
  * is shown, not what it says: a rail beside the week when there is width for
  * one, a sheet over it when there is not.
  *
- * The sheet can be dragged between half height and the whole screen, so it
- * passes `onToggleExpand` and gets a control for it. The rail cannot: it is
- * already as tall as the window, so the control is absent there rather than
- * present and inert.
+ * Content only: no close, no fullscreen, no chrome of its own. Both of those
+ * buttons used to sit in the row below, and both were a picture of a gesture
+ * that already existed. The sheet is dragged up to fill the screen and down
+ * to dismiss, and on the wide layout the rail is closed by back, so a control
+ * for either would be a second way to do a thing the finger already does.
  */
 @Composable
 fun EventDetail(
     event: CalendarEvent,
     tint: CourseTint,
     conflict: Boolean,
-    onClose: () -> Unit,
     modifier: Modifier = Modifier,
-    expanded: Boolean = false,
-    onToggleExpand: (() -> Unit)? = null,
 ) {
     val c = skema
     val text = textFor(event.summary, event.location.courseName, event.courseCode, event.fromRoomBooking)
@@ -62,20 +60,6 @@ fun EventDetail(
             event.courseCode?.let {
                 Text(it, color = c.inkMuted, fontSize = Type.small, fontWeight = FontWeight.Medium)
             }
-            Spacer(Modifier.weight(1f))
-            onToggleExpand?.let { toggle ->
-                // The chevron points the way the sheet will move, so the
-                // button and the drag say the same thing. Note that reads
-                // inverted against the icon names: a bottom sheet EXPANDS by
-                // travelling up, which is Ico.Collapse's chevron.
-                GlyphButton(
-                    ico = if (expanded) Ico.Expand else Ico.Collapse,
-                    description = if (expanded) "Back to half height" else "Fill the screen",
-                    onClick = toggle,
-                )
-                Spacer(Modifier.size(Space.tight))
-            }
-            GlyphButton(Ico.Close, "Close", onClose)
         }
 
         Spacer(Modifier.height(Space.small))
