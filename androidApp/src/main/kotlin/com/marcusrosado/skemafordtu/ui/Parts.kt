@@ -152,15 +152,17 @@ fun <T> Segmented(
                 selected = active,
                 onClick = { onSelect(option) },
                 shape = SegmentedButtonDefaults.itemShape(index, options.size, baseShape = SEGMENT),
-                icon = {
-                    if (ico != null) {
-                        Glyph(ico(option), tint = LocalContentColor.current, size = IconSizeQuiet, description = label(option))
-                    } else {
-                        SegmentedButtonDefaults.Icon(active)
-                    }
-                },
+                // Material sizes a segment from its label and slides the icon
+                // in beside it, so a glyph only segment puts the glyph where
+                // the label goes and leaves the icon slot empty; a glyph in the
+                // icon slot next to no label is a zero height segment.
+                icon = { if (ico == null) SegmentedButtonDefaults.Icon(active) },
                 label = {
-                    if (ico == null) Text(label(option), fontSize = Type.small, fontWeight = FontWeight.Medium)
+                    if (ico != null) {
+                        Glyph(ico(option), tint = LocalContentColor.current, description = label(option))
+                    } else {
+                        Text(label(option), fontSize = Type.small, fontWeight = FontWeight.Medium)
+                    }
                 },
             )
         }

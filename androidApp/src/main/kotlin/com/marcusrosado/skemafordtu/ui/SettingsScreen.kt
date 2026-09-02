@@ -24,7 +24,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -96,35 +106,42 @@ fun SettingsScreen(model: SkemaModel) {
     }
 }
 
+/**
+ * The settings under Material's bar. The title sits where every Android app
+ * puts it and back where every Android app puts it; the "Done" pill that
+ * used to sit in the corner said what back already says.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsList(model: SkemaModel, onSubjects: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = {
+                    IconButton(onClick = { model.screen = Screen.Calendar }) {
+                        Glyph(Ico.Back, tint = LocalContentColor.current, size = IconSizeLarge, description = "Back to the calendar")
+                    }
+                },
+            )
+        },
+    ) { insets ->
+        SettingsBody(model, onSubjects, Modifier.padding(insets))
+    }
+}
+
+@Composable
+private fun SettingsBody(model: SkemaModel, onSubjects: () -> Unit, modifier: Modifier = Modifier) {
     val c = skema
     val scope = rememberCoroutineScope()
 
     Column(
-        Modifier
+        modifier
             .fillMaxSize()
-            .background(c.background)
             .verticalScroll(rememberScrollState())
-            .padding(Space.medium)
+            .padding(horizontal = Space.medium)
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Settings",
-                color = c.accent,
-                fontSize = Type.large,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-            PillButton(
-                "Done",
-                { model.screen = Screen.Calendar },
-                filled = true,
-                ico = Ico.Check,
-            )
-        }
-
-        Spacer(Modifier.height(Space.large))
+        Spacer(Modifier.height(Space.small))
         SectionLabel("Feed", Ico.Link)
 
         Card(Modifier.fillMaxWidth()) {
@@ -137,7 +154,7 @@ private fun SettingsList(model: SkemaModel, onSubjects: () -> Unit) {
                         Text("Paste the link", color = c.inkMuted, fontSize = Type.small)
                     },
                     singleLine = false,
-                    shape = SquircleShape(Radius.chip),
+                    shape = MaterialTheme.shapes.small,
                     textStyle = androidx.compose.ui.text.TextStyle(
                         fontSize = Type.small,
                         color = c.ink,
@@ -189,7 +206,9 @@ private fun SettingsList(model: SkemaModel, onSubjects: () -> Unit) {
         Spacer(Modifier.height(Space.large))
         SectionLabel("Behaviour", Ico.Tune)
 
-        Card(Modifier.fillMaxWidth(), PaddingValues(Space.small)) {
+        // List items carry their own padding, so the card adds only a breath
+        // above the first and below the last.
+        Card(Modifier.fillMaxWidth(), PaddingValues(vertical = Space.unit)) {
             Column {
                 Picker("Theme", Ico.Theme) {
                     Segmented(
@@ -266,35 +285,55 @@ private fun SettingsList(model: SkemaModel, onSubjects: () -> Unit) {
  */
 @Composable
 internal fun SectionLabel(text: String, ico: Ico? = null, modifier: Modifier = Modifier) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier.padding(bottom = Space.tight, start = Space.unit),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.tight),
     ) {
-        if (ico != null) Glyph(ico, tint = skema.inkMuted, size = IconSizeQuiet)
+        if (ico != null) Glyph(ico, tint = muted, size = IconSizeQuiet)
         Text(
             text.uppercase(),
-            color = skema.inkMuted,
-            fontSize = Type.small,
+            style = MaterialTheme.typography.labelMedium,
+            color = muted,
             fontWeight = FontWeight.SemiBold,
         )
     }
 }
 
-/** A titled row holding a chooser, shaped like [Toggle] so the card lines up. */
+/**
+ * The rows of a settings card, each a reading of Material's ListItem, so a
+ * row here has the height, the padding and the pressed state a row has in
+ * every other Android settings screen. Transparent containers, because the
+ * card under them is the surface and a list item painting its own would
+ * put a second tone inside it.
+ */
+private val rowColours
+    @Composable get() = ListItemDefaults.colors(containerColor = Color.Transparent)
+
+/**
+ * A titled row holding a chooser: the title as a list item, the control on
+ * the line under it, starting where the title starts. A list item's
+ * supporting slot would centre the glyph on the whole block, which reads as
+ * the glyph belonging to the control rather than to the title.
+ */
 @Composable
 internal fun Picker(title: String, ico: Ico, content: @Composable () -> Unit) {
-    val c = skema
-    Row(Modifier.fillMaxWidth().padding(Space.small), verticalAlignment = Alignment.Top) {
-        // Centred in a box one type step tall, so the glyph lands on the
-        // title's line rather than riding above it.
-        Box(Modifier.height(Space.large), contentAlignment = Alignment.Center) {
-            Glyph(ico, tint = c.inkMuted)
-        }
-        Spacer(Modifier.width(Space.small))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = c.ink, fontSize = Type.normal, fontWeight = FontWeight.Medium)
-            Spacer(Modifier.height(Space.tight))
+    Column {
+        ListItem(
+            headlineContent = { Text(title, fontSize = Type.normal, fontWeight = FontWeight.Medium) },
+            leadingContent = { Glyph(ico, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+            colors = rowColours,
+        )
+        // The list item's own start padding, its glyph, and the gap after
+        // it, so the control lines up under the title's first letter.
+        Box(
+            Modifier.padding(
+                start = Space.medium + IconSize + Space.medium,
+                end = Space.medium,
+                bottom = Space.small,
+            ),
+        ) {
             content()
         }
     }
@@ -302,7 +341,8 @@ internal fun Picker(title: String, ico: Ico, content: @Composable () -> Unit) {
 
 /**
  * A switch with a title, and a line under it only where the title leaves a
- * real question open. Most do not.
+ * real question open. Most do not. The whole row flips it, the way a stock
+ * settings row does.
  */
 @Composable
 internal fun Toggle(
@@ -312,28 +352,16 @@ internal fun Toggle(
     ico: Ico,
     detail: String? = null,
 ) {
-    val c = skema
-    Row(
-        Modifier.fillMaxWidth().padding(Space.small),
-        verticalAlignment = Alignment.Top,
-    ) {
-        // The glyphs line up in a column of their own, so the titles start on
-        // one edge whatever shape sits beside them. Centred in a box one type
-        // step tall, so the glyph lands on the title's line.
-        Box(Modifier.height(Space.large), contentAlignment = Alignment.Center) {
-            Glyph(ico, tint = c.inkMuted)
-        }
-        Spacer(Modifier.width(Space.small))
-        Column(Modifier.weight(1f)) {
-            Text(title, color = c.ink, fontSize = Type.normal, fontWeight = FontWeight.Medium)
-            if (detail != null) {
-                Spacer(Modifier.height(2.dp))
-                Text(detail, color = c.inkMuted, fontSize = Type.small)
-            }
-        }
-        Spacer(Modifier.width(Space.small))
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
+    val supporting: (@Composable () -> Unit)? =
+        if (detail == null) null else { { Text(detail, fontSize = Type.small) } }
+    ListItem(
+        headlineContent = { Text(title, fontSize = Type.normal, fontWeight = FontWeight.Medium) },
+        supportingContent = supporting,
+        leadingContent = { Glyph(ico, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = onChange) },
+        colors = rowColours,
+        modifier = Modifier.clickable { onChange(!checked) },
+    )
 }
 
 /**
@@ -348,26 +376,22 @@ private fun NavRow(
     trailing: Ico,
     onClick: () -> Unit,
 ) {
-    val c = skema
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(Space.small),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.height(Space.large), contentAlignment = Alignment.Center) {
-            Glyph(ico, tint = c.inkMuted)
-        }
-        Spacer(Modifier.width(Space.small))
-        Text(
-            title,
-            color = c.ink,
-            fontSize = Type.normal,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f),
-        )
-        Text(value, color = c.inkMuted, fontSize = Type.small)
-        Spacer(Modifier.width(Space.tight))
-        Glyph(trailing, tint = c.inkMuted, size = IconSizeQuiet)
-    }
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    ListItem(
+        headlineContent = { Text(title, fontSize = Type.normal, fontWeight = FontWeight.Medium) },
+        leadingContent = { Glyph(ico, tint = muted) },
+        trailingContent = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.tight),
+            ) {
+                Text(value, color = muted, fontSize = Type.small)
+                Glyph(trailing, tint = muted, size = IconSizeQuiet)
+            }
+        },
+        colors = rowColours,
+        modifier = Modifier.clickable(onClick = onClick),
+    )
 }
 
 @Composable
@@ -379,15 +403,10 @@ private fun Fact(label: String, value: String) {
     }
 }
 
+/** Material's own rule between two rows, inset to the rows' text. */
 @Composable
 internal fun Divider() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = Space.small)
-            .height(1.dp)
-            .background(skema.hairline)
-    )
+    HorizontalDivider(Modifier.padding(horizontal = Space.medium))
 }
 
 /**
@@ -417,7 +436,7 @@ private fun EnrolmentSection(model: SkemaModel) {
     // it closes the settings under it.
     BackHandler(enabled = picking) { picking = false }
 
-    Card(Modifier.fillMaxWidth(), PaddingValues(Space.small)) {
+    Card(Modifier.fillMaxWidth(), PaddingValues(vertical = Space.unit)) {
         Column(
             Modifier.animateContentSize(tween(Motion.VIEW_IN, easing = Motion.arrive))
         ) {
@@ -557,7 +576,7 @@ private fun EnrolmentMonth(
     modifier: Modifier = Modifier,
 ) {
     val c = skema
-    val shape = SquircleShape(Radius.chip)
+    val shape = MaterialTheme.shapes.small
     Box(
         modifier
             .background(if (selected) c.accent else c.surfaceSunken, shape)

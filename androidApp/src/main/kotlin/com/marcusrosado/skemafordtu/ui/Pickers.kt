@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,10 +42,10 @@ import kotlin.math.ceil
  * grid is sized from the longest name there is rather than from a column count
  * picked in advance, so the full word always has room.
  *
- * The panel is a [BottomSheet], so its way in and out, the drag, the scrim
- * and the back gesture are every other sheet's. A pick lands first and the
- * panel leaves afterwards, so the month behind is already the month asked
- * for while the sheet is still sliding off it.
+ * The panel is a [BottomSheet], Material's, so its way in and out, the drag,
+ * the scrim and the back gesture are every other sheet's. A pick lands first
+ * and the panel leaves afterwards, so the month behind is already the month
+ * asked for while the sheet is still sliding off it.
  */
 @Composable
 fun MonthYearSheet(
@@ -57,7 +59,7 @@ fun MonthYearSheet(
     val years = remember(minYear, maxYear) { (minYear..maxYear.coerceAtLeast(minYear)).toList() }
     var year by remember { mutableStateOf(initial.year.coerceIn(years.first(), years.last())) }
 
-    BottomSheet(onDismiss, label = "jump") { close ->
+    BottomSheet(onDismiss) { close ->
         Column {
             Text(
                 "Jump to",
@@ -93,7 +95,7 @@ fun MonthYearSheet(
 }
 
 /**
- * The years, as one scrolling row of pills.
+ * The years, as one scrolling row of Material's filter chips.
  *
  * The range comes from the caller, which knows the enrolment date and the end
  * of the feed, so this never offers a decade nobody is enrolled for. It opens
@@ -110,10 +112,10 @@ private fun YearRow(years: List<Int>, selected: Int, onPick: (Int) -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(Space.tight),
     ) {
         items(years.size, key = { years[it] }) { i ->
-            PillButton(
-                label = years[i].toString(),
+            FilterChip(
+                selected = years[i] == selected,
                 onClick = { onPick(years[i]) },
-                filled = years[i] == selected,
+                label = { Text(years[i].toString(), fontSize = Type.small, fontWeight = FontWeight.Medium) },
             )
         }
     }
@@ -187,7 +189,9 @@ private fun MonthCell(
     modifier: Modifier = Modifier,
 ) {
     val c = skema
-    val shape = SquircleShape(Radius.chip)
+    // The theme's small squircle and the scheme's colours: the chosen month
+    // is primary on onPrimary, the rest sit one tone up from the sheet.
+    val shape = MaterialTheme.shapes.small
     Box(
         modifier
             .clip(shape)

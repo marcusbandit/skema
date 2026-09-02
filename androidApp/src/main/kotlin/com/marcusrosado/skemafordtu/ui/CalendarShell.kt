@@ -727,13 +727,6 @@ private fun DetailPane(model: SkemaModel, palette: CoursePalette) {
 }
 
 /**
- * A hint that something is in front, not a curtain. This is the value at full
- * screen; the partial stop scales it down to about half, which is as close to
- * invisible as a scrim can get and still separate two surfaces.
- */
-internal const val SCRIM_MAX = 0.18f
-
-/**
  * Whether the platform has been asked to stop animating.
  *
  * Compose already scales every tween and spring by the same factor, so an

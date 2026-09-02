@@ -34,7 +34,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -71,9 +77,9 @@ import kotlin.math.roundToInt
  * Everything is read off the same model and the same palette as the calendar,
  * so a course is the colour here that it is there, and nothing is stored.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SemesterView(model: SkemaModel, palette: CoursePalette, modifier: Modifier = Modifier) {
-    val c = skema
     val reduced = reducedMotion()
 
     // model.terms is academic order, oldest first, which is the right order to
@@ -95,38 +101,43 @@ fun SemesterView(model: SkemaModel, palette: CoursePalette, modifier: Modifier =
     BackHandler(enabled = open != null) { open = null }
     BackHandler(enabled = open == null) { model.screen = Screen.Calendar }
 
-    Column(modifier.fillMaxSize().background(c.background)) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Space.medium, vertical = Space.small),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (open != null) {
-                GlyphButton(Ico.Back, "Back to the semester list", { open = null })
-                Spacer(Modifier.width(Space.small))
-            }
-            Column(Modifier.weight(1f)) {
-                Text(
-                    open?.label ?: "Semesters",
-                    color = c.accent,
-                    fontSize = Type.large,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                )
-                Text(
-                    remember(model.visible, open, terms.size) { subhead(model, open, terms.size) },
-                    color = c.inkMuted,
-                    fontSize = Type.small,
-                    maxLines = 1,
-                )
-            }
-            PillButton("Done", { model.screen = Screen.Calendar }, filled = true, ico = Ico.Check)
-        }
-
+    Scaffold(
+        modifier = modifier,
+        topBar = {
+            // Material's bar. One back control does both jobs: inside a
+            // semester it returns to the list, on the list it returns to the
+            // calendar, which is the order the back gesture unwinds in too.
+            // The "Done" pill said what back already says.
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(open?.label ?: "Semesters", maxLines = 1)
+                        Text(
+                            remember(model.visible, open, terms.size) { subhead(model, open, terms.size) },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = { if (open != null) open = null else model.screen = Screen.Calendar }) {
+                        Glyph(
+                            Ico.Back,
+                            tint = LocalContentColor.current,
+                            size = IconSizeLarge,
+                            description = if (open != null) "Back to the semester list" else "Back to the calendar",
+                        )
+                    }
+                },
+            )
+        },
+    ) { insets ->
         AnimatedContent(
             targetState = open,
             // Clipped, because the two panes cross sideways and neither may
-            // paint over the header they are moving underneath.
-            modifier = Modifier.fillMaxSize().clipToBounds(),
+            // paint over the bar they are moving underneath.
+            modifier = Modifier.fillMaxSize().padding(insets).clipToBounds(),
             // A semester arrives from the right and leaves back to the right,
             // which is the direction [SwipeBack] takes it. The gesture and the
             // transition are then one movement rather than two ideas about
@@ -275,7 +286,7 @@ private fun TermCard(
             .fillMaxWidth()
             // Clipped before the click so the press stays inside the squircle
             // rather than flashing the card's bounding box.
-            .clip(SquircleShape(Radius.card))
+            .clip(MaterialTheme.shapes.medium)
             .clickable { onOpen(term) },
     ) {
         Column {

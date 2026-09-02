@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -39,12 +40,11 @@ import com.marcusrosado.skemafordtu.data.ViewMode
 @Composable
 fun DisplaySheet(model: SkemaModel, onDismiss: () -> Unit) {
     val c = skema
-    BottomSheet(onDismiss, label = "display") {
+    BottomSheet(onDismiss) {
         Text(
             "Settings",
-            color = c.accent,
-            fontSize = Type.large,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
         )
         Spacer(Modifier.height(Space.medium))
@@ -67,7 +67,7 @@ fun DisplaySheet(model: SkemaModel, onDismiss: () -> Unit) {
 
         Spacer(Modifier.height(Space.medium))
         SectionLabel("Display")
-        Card(Modifier.fillMaxWidth(), PaddingValues(Space.small), background = c.surfaceSunken) {
+        Card(Modifier.fillMaxWidth(), PaddingValues(vertical = Space.unit), background = c.surfaceSunken) {
             Column {
                 Picker("Theme", Ico.Theme) {
                     Segmented(

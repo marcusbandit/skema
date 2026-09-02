@@ -1,11 +1,8 @@
 package com.marcusrosado.skemafordtu.ui
 
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,29 +11,29 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import com.marcusrosado.skemafordtu.ics.CalendarEvent
-import kotlinx.coroutines.launch
-import kotlin.math.max
-import kotlin.math.roundToInt
 
 /**
  * The courses, and the colour each one wears.
@@ -47,6 +44,7 @@ import kotlin.math.roundToInt
  * usually only which colour 02322 is. So a course is one row until it is
  * tapped, and only the tapped one becomes an editor.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubjectsScreen(model: SkemaModel, onBack: () -> Unit) {
     val c = skema
@@ -82,23 +80,25 @@ fun SubjectsScreen(model: SkemaModel, onBack: () -> Unit) {
     // then leaves for the settings underneath.
     BackHandler { if (open != null) open = null else onBack() }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(c.background)
-            .dragBack(onBack)
-    ) {
-        Text(
-            "Subjects",
-            color = c.accent,
-            fontSize = Type.large,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = Space.medium, vertical = Space.small),
-        )
-
+    // Material's bar, with back where every Android app has it. The drag to
+    // the right that used to leave this screen is the system's own back
+    // gesture now, predictive animation included, so it is not drawn twice.
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Subjects") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Glyph(Ico.Back, tint = LocalContentColor.current, size = IconSizeLarge, description = "Back to settings")
+                    }
+                },
+            )
+        },
+    ) { insets ->
         Column(
             Modifier
                 .fillMaxSize()
+                .padding(insets)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = Space.medium)
         ) {
@@ -163,11 +163,10 @@ fun SubjectsScreen(model: SkemaModel, onBack: () -> Unit) {
 }
 
 /**
- * One course, closed: the code in its own colour, and the name.
- *
- * No hue strip, no status line, no chevron. Fifteen of these read as a list of
- * courses, which is what the screen is, and the row grows into the editor when
- * it is asked to.
+ * One course, closed: Material's list item with the code in its own colour
+ * leading and the name as the line. No hue strip, no status line, no chevron.
+ * Fifteen of these read as a list of courses, which is what the screen is,
+ * and the row grows into the editor when it is asked to.
  */
 @Composable
 private fun CourseRow(
@@ -177,39 +176,22 @@ private fun CourseRow(
     pinned: Boolean,
     onClick: () -> Unit,
 ) {
-    val c = skema
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = Space.tight, vertical = Space.tight),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Space.small),
-    ) {
-        Tag(code, background = tint.fill, foreground = tint.ink)
-        if (name.isBlank()) {
-            Spacer(Modifier.weight(1f))
-        } else {
-            Text(
-                name,
-                color = c.ink,
-                fontSize = Type.normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        // A hue chosen by hand is worth saying, and the glyph says it without
-        // spending a line of type on the number of degrees.
-        if (pinned) {
-            Glyph(
-                Ico.Palette,
-                tint = c.inkMuted,
-                size = IconSizeQuiet,
-                description = "Colour chosen by hand",
-            )
-        }
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    // A hue chosen by hand is worth saying, and the glyph says it without
+    // spending a line of type on the number of degrees.
+    val trailing: (@Composable () -> Unit)? = if (!pinned) null else {
+        { Glyph(Ico.Palette, tint = muted, size = IconSizeQuiet, description = "Colour chosen by hand") }
     }
+    ListItem(
+        headlineContent = {
+            // A course the feed never named shows its code, rather than a gap.
+            Text(name.ifBlank { code }, fontSize = Type.normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        leadingContent = { Tag(code, background = tint.fill, foreground = tint.ink) },
+        trailingContent = trailing,
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.clickable(onClick = onClick),
+    )
 }
 
 /** The semester a run of courses belongs to. */
@@ -223,64 +205,6 @@ private fun TermLabel(text: String) {
         modifier = Modifier.padding(start = Space.unit, bottom = Space.tight),
     )
 }
-
-/**
- * Drag right to leave.
- *
- * Android has a back gesture and this screen answers it, but the desktop has
- * none, and a screen whose only way out is a button is the sort of furniture
- * the owner asked to stop seeing. The screen follows the finger and either
- * carries on out or springs back, so the drag says what it is going to do
- * before it is finished.
- *
- * Only drags nothing else wanted get here: the hue strip and the scroller
- * consume their own, and a horizontal drag has to cross the slop first, so
- * scrolling the list never starts a dismissal.
- */
-@Composable
-private fun Modifier.dragBack(onBack: () -> Unit): Modifier {
-    val scope = rememberCoroutineScope()
-    val slide = remember { Animatable(0f) }
-    var width by remember { mutableIntStateOf(1) }
-    var leaving by remember { mutableStateOf(false) }
-
-    return this
-        .onSizeChanged { if (it.width > 0) width = it.width }
-        .offset { IntOffset(slide.value.roundToInt(), 0) }
-        .pointerInput(width) {
-            detectHorizontalDragGestures(
-                onDragEnd = {
-                    scope.launch {
-                        if (slide.value > width * BACK_TRAVEL) {
-                            leaving = true
-                            slide.animateTo(
-                                width.toFloat(),
-                                tween(Motion.SHEET_OUT, easing = Motion.leave),
-                            )
-                            onBack()
-                        } else {
-                            slide.animateTo(0f, Motion.settle)
-                        }
-                    }
-                },
-                onDragCancel = { scope.launch { slide.animateTo(0f, Motion.settle) } },
-            ) { change, dx ->
-                if (!leaving) {
-                    change.consume()
-                    // Rightwards only. Dragging the other way would pull the
-                    // screen off an edge it can never leave by.
-                    scope.launch { slide.snapTo(max(0f, slide.value + dx)) }
-                }
-            }
-        }
-}
-
-/**
- * How far across the screen has to travel before letting go means leaving.
- * A quarter is short enough to flick and long enough that a stray drag on the
- * way to a course still springs back.
- */
-private const val BACK_TRAVEL = 0.25f
 
 /** One course as this list shows it: the code, and the name if the feed gave one. */
 private data class Subject(val code: String, val name: String)

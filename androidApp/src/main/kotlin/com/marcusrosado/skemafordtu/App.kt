@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,15 +77,13 @@ fun App() {
         // setting. The two differ whenever the theme is chosen by hand.
         SystemBars(dark)
         // Android draws edge to edge from API 35 whether you ask for it or
-        // not. The calendar's scaffold keeps its content out of the bars
-        // itself and lets its own bars and drawer run under them; the two
-        // screens that still draw their own chrome keep out of the bars
-        // the old way until they get a scaffold of their own.
+        // not. Every screen is a scaffold, so each keeps its content out of
+        // the bars itself and lets its own bar and drawer run under them.
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             when (model.screen) {
                 Screen.Calendar -> CalendarShell(model, palette)
-                Screen.Semesters -> Box(Modifier.safeDrawingPadding()) { SemesterView(model, palette) }
-                Screen.Settings -> Box(Modifier.safeDrawingPadding()) { SettingsScreen(model) }
+                Screen.Semesters -> SemesterView(model, palette)
+                Screen.Settings -> SettingsScreen(model)
             }
         }
     }
