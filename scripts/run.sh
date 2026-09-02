@@ -17,7 +17,7 @@ ADB="$SDK/platform-tools/adb"
 
 # From androidApp/build.gradle.kts (applicationId) and androidApp/src/main/AndroidManifest.xml
 # (the activity's android:name, relative to the namespace).
-PKG="dk.bandit.skema"
+PKG="com.marcusrosado.skemafordtu"
 ACTIVITY="${PKG}/.MainActivity"
 APK_DIR="$ROOT/androidApp/build/outputs/apk/debug"
 

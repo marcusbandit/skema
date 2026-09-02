@@ -5,15 +5,20 @@ plugins {
 }
 
 android {
-    namespace = "dk.bandit.skema"
+    namespace = "com.marcusrosado.skemafordtu"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dk.bandit.skema"
+        applicationId = "com.marcusrosado.skemafordtu"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        // Bumped on every build that leaves this machine, without exception.
+        // Two debug builds shipped as versionCode 1, so Android saw them as
+        // the same app and an install was a silent no-op unless it happened to
+        // replace the file. versionName is what the owner reads; versionCode
+        // is the only number Android compares.
+        versionCode = 3
+        versionName = "0.3.0"
     }
 }
 

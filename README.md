@@ -195,6 +195,17 @@ running app: same pid, no activity relaunch, pixel-identical afterwards.
 iOS is left out because linking it needs a Mac. `shared/build.gradle.kts`
 has the two lines to add it back.
 
+## Versioning and identity
+
+The app is `com.marcusrosado.skemafordtu`. Android package segments have to be
+valid Java identifiers, so the hyphens in "skema for DTU" cannot survive; the
+name is the closest legal rendering that keeps the domain and the university.
+
+**Every build handed to a human bumps `versionCode` and `versionName` first.**
+Android compares `versionCode` and nothing else, so two builds sharing one are
+the same app to it: the second install is a silent no-op or an unexplained
+"app not installed". The git tag and `versionName` carry the same number.
+
 ## Toolchain
 
 Kotlin 2.4.10, Compose Multiplatform 1.12.0, AGP 9.1.0, Gradle 9.5.0,

@@ -2,7 +2,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import dk.bandit.skema.shared.App
+import com.marcusrosado.skemafordtu.shared.App
 
 /**
  * The same App() the phone runs, in a window. Handy for working on the UI

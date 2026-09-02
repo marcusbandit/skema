@@ -1,11 +1,11 @@
-package dk.bandit.skema
+package com.marcusrosado.skemafordtu
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import dk.bandit.skema.data.SkemaAndroid
-import dk.bandit.skema.shared.App
+import com.marcusrosado.skemafordtu.data.SkemaAndroid
+import com.marcusrosado.skemafordtu.shared.App
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

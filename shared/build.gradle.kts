@@ -9,7 +9,7 @@ plugins {
 kotlin {
     jvm()
     android {
-        namespace = "dk.bandit.skema.shared"
+        namespace = "com.marcusrosado.skemafordtu.shared"
         compileSdk = 37
         minSdk = 26
     }
