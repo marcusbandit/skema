@@ -30,8 +30,9 @@ fi
 [ -n "${SKEMA_EMU_GPU:-}" ] && gpu="$SKEMA_EMU_GPU"
 
 # Capped in its own cgroup with swap forbidden, so a runaway guest dies
-# before the desktop does.
+# before the desktop does. SKEMA_EMU_MEM_MAX raises the cap for a session
+# where the guest keeps dying at 137 right after its snapshot loads.
 exec systemd-run --user --scope -q \
-  -p MemoryMax=6500M -p MemorySwapMax=0 -p CPUQuota=600% \
+  -p MemoryMax="${SKEMA_EMU_MEM_MAX:-6500M}" -p MemorySwapMax=0 -p CPUQuota=600% \
   "$SDK/emulator/emulator" -avd "$AVD" -memory 3072 -no-audio -no-boot-anim \
     -gpu "$gpu" "${extra[@]}" "$@"
